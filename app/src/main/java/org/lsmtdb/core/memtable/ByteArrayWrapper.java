@@ -1,6 +1,6 @@
 package org.lsmtdb.core.memtable;
 
-class ByteArrayWrapper implements Comparable<ByteArrayWrapper> {
+public class ByteArrayWrapper implements Comparable<ByteArrayWrapper> {
     private final byte[] data;
 
     public ByteArrayWrapper(byte[] data){
@@ -36,5 +36,7 @@ class ByteArrayWrapper implements Comparable<ByteArrayWrapper> {
         return Integer.compare(data.length, other.data.length);
     }
 
-    
+    public byte[] getData(){
+        return  this.data;
+    }
 }
