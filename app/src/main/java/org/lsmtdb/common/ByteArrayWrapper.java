@@ -1,4 +1,4 @@
-package org.lsmtdb.core.memtable;
+package org.lsmtdb.common;
 
 public class ByteArrayWrapper implements Comparable<ByteArrayWrapper> {
     private final byte[] data;

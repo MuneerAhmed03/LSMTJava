@@ -10,96 +10,152 @@ import java.util.Map;
 import java.util.ArrayList;
 import java.util.Iterator;
 
-import org.lsmtdb.core.memtable.*;;
+import org.lsmtdb.common.ByteArrayWrapper;
+import org.lsmtdb.common.Value;
+import org.lsmtdb.core.memtable.*;
 
-public class SSTableWriter {
+public class SSTableWriter implements AutoCloseable {
+    private static final int BUFFER_SIZE = 1024 * 1024;
+    private static final int INDEX_ENTRY_INTERVAL = 128;
+    private static final long FOOTER_MAGIC = 0xFACEDBEECAFEBEEFL;
+
     private final FileChannel channel;
     private long currentOffset;
-    private final List<IndexEntry> index = new ArrayList<>();
+    private final List<IndexEntry> index;
+    private final ByteBuffer buffer;
+    private boolean isClosed;
 
-    static class  IndexEntry {
-        byte[] key;
-        long offset;
+    static class IndexEntry {
+        private final byte[] key;
+        private final long offset;
 
-        IndexEntry(byte[] key, long offset){
+        IndexEntry(byte[] key, long offset) {
             this.key = key;
             this.offset = offset;
         }
-        
     }
 
     public SSTableWriter(String filepath) throws IOException {
         File file = new File(filepath);
         this.channel = new RandomAccessFile(file, "rw").getChannel();
         this.currentOffset = 0;
+        this.index = new ArrayList<>();
+        this.buffer = ByteBuffer.allocate(BUFFER_SIZE);
+        this.isClosed = false;
     }
 
-    public void write(Memtable memtable) throws IOException{
-        ByteBuffer buffer = ByteBuffer.allocate(1024*1024);
+    public void write(Memtable memtable) throws IOException {
+        if (isClosed) {
+            throw new IllegalStateException("SSTableWriter is already closed");
+        }
+        long dataOffset = currentOffset;
+        writeData(memtable);
+        long indexOffset = currentOffset;
+        writeIndex();
+        writeFooter(indexOffset,dataOffset);
+    }
+
+
+    private void writeData(Memtable memtable) throws IOException {
         Iterator<Map.Entry<ByteArrayWrapper, Value>> it = memtable.iterator();
 
-        while(it.hasNext()){
+        while (it.hasNext()) {
             long entryOffset = currentOffset + buffer.position();
-            Map.Entry<ByteArrayWrapper,Value> entry = it.next();
-
-            byte[] key = entry.getKey().getData();
-            Value value = entry.getValue();
-
-            int keyLength = key.length;
-            int valueLength = value.isDeleted() ? 0 : value.getValue().length;
-            int entrySize = Integer.BYTES + keyLength + Long.BYTES + Byte.BYTES + (value.isDeleted() ? 0 : Integer.BYTES + valueLength);
-
-            if(buffer.remaining() < entrySize){
-                buffer.flip();
-                channel.write(buffer,currentOffset);
-                currentOffset+=buffer.position();
-                buffer.clear();
-            }
-
-            if(index.isEmpty() || index.size()%128 == 0){
-                index.add(new IndexEntry(key, entryOffset));
-            }
-
-            buffer.putInt(keyLength);
-            buffer.put(key);
-            buffer.putLong(value.getTimestamp());
-            buffer.put((byte) (value.isDeleted() ? 1 : 0));
-            if(!value.isDeleted()){
-                buffer.putInt(valueLength);
-                buffer.put(value.getValue());
-            }
+            Map.Entry<ByteArrayWrapper, Value> entry = it.next();
+            writeEntry(entry, entryOffset);
         }
 
-        buffer.flip();
-        channel.write(buffer,currentOffset);
-        currentOffset+=buffer.position();
-        buffer.clear();
+        flushBuffer();
+    }
 
-        long indexOffset = currentOffset;
-        int indexSize = Integer.BYTES;
-        for(IndexEntry idx : index ) {
-            indexSize += Integer.BYTES + idx.key.length + Long.BYTES;
+    private void writeEntry(Map.Entry<ByteArrayWrapper, Value> entry, long entryOffset) throws IOException {
+        byte[] key = entry.getKey().getData();
+        Value value = entry.getValue();
+
+        int keyLength = key.length;
+        int valueLength = value.isDeleted() ? 0 : value.getValue().length;
+        int entrySize = calculateEntrySize(keyLength, valueLength, value.isDeleted());
+
+        if (buffer.remaining() < entrySize) {
+            flushBuffer();
         }
 
+        if (shouldAddIndexEntry()) {
+            index.add(new IndexEntry(key, entryOffset));
+        }
+
+        writeEntryToBuffer(key, value);
+    }
+
+    private int calculateEntrySize(int keyLength, int valueLength, boolean isDeleted) {
+        return Integer.BYTES + keyLength + Long.BYTES + Byte.BYTES + 
+               (isDeleted ? 0 : Integer.BYTES + valueLength);
+    }
+
+    private boolean shouldAddIndexEntry() {
+        return index.isEmpty() || index.size() % INDEX_ENTRY_INTERVAL == 0;
+    }
+
+    private void writeEntryToBuffer(byte[] key, Value value) {
+        buffer.putInt(key.length);
+        buffer.putInt(value.isDeleted() ? value.getValue().length : -1);
+        buffer.putLong(value.getTimestamp());
+        buffer.put(key);
+        if (!value.isDeleted()) {
+            buffer.put(value.getValue());
+        }
+    }
+
+    private void writeIndex() throws IOException {
+        ByteBuffer indexBuffer = createIndexBuffer();
+        channel.write(indexBuffer, currentOffset);
+        currentOffset += indexBuffer.position();
+    }
+
+    private ByteBuffer createIndexBuffer() {
+        int indexSize = calculateIndexSize();
         ByteBuffer indexBuffer = ByteBuffer.allocate(indexSize);
         indexBuffer.putInt(indexSize);
-        for(IndexEntry idx : index) {
+        
+        for (IndexEntry idx : index) {
             indexBuffer.putInt(idx.key.length);
             indexBuffer.put(idx.key);
             indexBuffer.putLong(idx.offset);
         }
-
+        
         indexBuffer.flip();
-        channel.write(indexBuffer,currentOffset);
-        currentOffset+=indexBuffer.position();
+        return indexBuffer;
+    }
 
+    private int calculateIndexSize() {
+        int size = Integer.BYTES;
+        for (IndexEntry idx : index) {
+            size += Integer.BYTES + idx.key.length + Long.BYTES;
+        }
+        return size;
+    }
+
+    private void writeFooter(long indexOffset,long dataOffset) throws IOException {
         ByteBuffer footerBuffer = ByteBuffer.allocate(Long.BYTES + Long.BYTES);
         footerBuffer.putLong(indexOffset);
-        footerBuffer.putLong(0xFACEDBEECAFEBEEFL);
+        footerBuffer.putLong(dataOffset);
+        footerBuffer.putLong(FOOTER_MAGIC);
         footerBuffer.flip();
-        channel.write(footerBuffer,currentOffset);
+        channel.write(footerBuffer, currentOffset);
+    }
 
-        channel.close();
+    private void flushBuffer() throws IOException {
+        buffer.flip();
+        channel.write(buffer, currentOffset);
+        currentOffset += buffer.position();
+        buffer.clear();
+    }
 
+    @Override
+    public void close() throws IOException {
+        if (!isClosed) {
+            channel.close();
+            isClosed = true;
+        }
     }
 }

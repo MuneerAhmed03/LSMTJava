@@ -7,6 +7,9 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.ReadWriteLock;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
+import org.lsmtdb.common.ByteArrayWrapper;
+import org.lsmtdb.common.Value;
+
 public class Memtable {
 
     private static volatile Memtable instance;
