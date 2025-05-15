@@ -13,26 +13,33 @@ import java.util.Iterator;
 import org.lsmtdb.common.ByteArrayWrapper;
 import org.lsmtdb.common.Value;
 import org.lsmtdb.core.memtable.*;
+import org.lsmtdb.core.sstable.util.SSTableConstants;
+import org.lsmtdb.core.sstable.util.SSTableEntryHeader;
+import org.lsmtdb.core.sstable.util.SSTableFooterUtils;
+import org.lsmtdb.core.sstable.util.SSTableIndexUtils;
 
 public class SSTableWriter implements AutoCloseable {
     private static final int BUFFER_SIZE = 1024 * 1024;
     private static final int INDEX_ENTRY_INTERVAL = 128;
-    private static final long FOOTER_MAGIC = 0xFACEDBEECAFEBEEFL;
 
     private final FileChannel channel;
     private long currentOffset;
-    private final List<IndexEntry> index;
+    private final List<SSTableIndexUtils.IndexEntry> index;
     private final ByteBuffer buffer;
     private boolean isClosed;
 
-    static class IndexEntry {
+    public static class IndexEntry implements SSTableIndexUtils.IndexEntry {
         private final byte[] key;
         private final long offset;
 
-        IndexEntry(byte[] key, long offset) {
+        public IndexEntry(byte[] key, long offset) {
             this.key = key;
             this.offset = offset;
         }
+        @Override
+        public byte[] getKey() { return key; }
+        @Override
+        public long getOffset() { return offset; }
     }
 
     public SSTableWriter(String filepath) throws IOException {
@@ -46,100 +53,68 @@ public class SSTableWriter implements AutoCloseable {
 
     public void write(Memtable memtable) throws IOException {
         if (isClosed) {
-            throw new IllegalStateException("SSTableWriter is already closed");
+            throw new IllegalStateException("sstablewriter is already closed");
         }
         long dataOffset = currentOffset;
         writeData(memtable);
         long indexOffset = currentOffset;
         writeIndex();
-        writeFooter(indexOffset,dataOffset);
+        writeFooter(indexOffset, dataOffset);
     }
-
 
     private void writeData(Memtable memtable) throws IOException {
         Iterator<Map.Entry<ByteArrayWrapper, Value>> it = memtable.iterator();
-
         while (it.hasNext()) {
             long entryOffset = currentOffset + buffer.position();
             Map.Entry<ByteArrayWrapper, Value> entry = it.next();
             writeEntry(entry, entryOffset);
         }
-
         flushBuffer();
     }
 
     private void writeEntry(Map.Entry<ByteArrayWrapper, Value> entry, long entryOffset) throws IOException {
         byte[] key = entry.getKey().getData();
         Value value = entry.getValue();
-
         int keyLength = key.length;
         int valueLength = value.isDeleted() ? 0 : value.getValue().length;
-        int entrySize = calculateEntrySize(keyLength, valueLength, value.isDeleted());
-
+        int entrySize = SSTableConstants.HEADER_SIZE + keyLength + (value.isDeleted() ? 0 : valueLength);
         if (buffer.remaining() < entrySize) {
             flushBuffer();
         }
-
         if (shouldAddIndexEntry()) {
             index.add(new IndexEntry(key, entryOffset));
         }
-
-        writeEntryToBuffer(key, value);
-    }
-
-    private int calculateEntrySize(int keyLength, int valueLength, boolean isDeleted) {
-        return Integer.BYTES + keyLength + Long.BYTES + Byte.BYTES + 
-               (isDeleted ? 0 : Integer.BYTES + valueLength);
-    }
-
-    private boolean shouldAddIndexEntry() {
-        return index.isEmpty() || index.size() % INDEX_ENTRY_INTERVAL == 0;
-    }
-
-    private void writeEntryToBuffer(byte[] key, Value value) {
-        buffer.putInt(key.length);
-        buffer.putInt(value.isDeleted() ? value.getValue().length : -1);
-        buffer.putLong(value.getTimestamp());
+        SSTableEntryHeader.writeTo(buffer, key.length, value.isDeleted() ? -1 : value.getValue().length, value.getTimestamp());
         buffer.put(key);
         if (!value.isDeleted()) {
             buffer.put(value.getValue());
         }
     }
 
-    private void writeIndex() throws IOException {
-        ByteBuffer indexBuffer = createIndexBuffer();
-        channel.write(indexBuffer, currentOffset);
-        currentOffset += indexBuffer.position();
+    private boolean shouldAddIndexEntry() {
+        return index.isEmpty() || index.size() % INDEX_ENTRY_INTERVAL == 0;
     }
 
-    private ByteBuffer createIndexBuffer() {
+    private void writeIndex() throws IOException {
         int indexSize = calculateIndexSize();
         ByteBuffer indexBuffer = ByteBuffer.allocate(indexSize);
-        indexBuffer.putInt(indexSize);
-        
-        for (IndexEntry idx : index) {
-            indexBuffer.putInt(idx.key.length);
-            indexBuffer.put(idx.key);
-            indexBuffer.putLong(idx.offset);
-        }
-        
+        SSTableIndexUtils.writeIndex(indexBuffer, index);
         indexBuffer.flip();
-        return indexBuffer;
+        channel.write(indexBuffer, currentOffset);
+        currentOffset += indexBuffer.limit();
     }
 
     private int calculateIndexSize() {
         int size = Integer.BYTES;
-        for (IndexEntry idx : index) {
-            size += Integer.BYTES + idx.key.length + Long.BYTES;
+        for (SSTableIndexUtils.IndexEntry idx : index) {
+            size += Integer.BYTES + idx.getKey().length + Long.BYTES;
         }
         return size;
     }
 
-    private void writeFooter(long indexOffset,long dataOffset) throws IOException {
-        ByteBuffer footerBuffer = ByteBuffer.allocate(Long.BYTES + Long.BYTES);
-        footerBuffer.putLong(indexOffset);
-        footerBuffer.putLong(dataOffset);
-        footerBuffer.putLong(FOOTER_MAGIC);
+    private void writeFooter(long indexOffset, long dataOffset) throws IOException {
+        ByteBuffer footerBuffer = ByteBuffer.allocate(SSTableConstants.FOOTER_SIZE);
+        SSTableFooterUtils.writeFooter(footerBuffer, indexOffset, dataOffset);
         footerBuffer.flip();
         channel.write(footerBuffer, currentOffset);
     }
@@ -147,7 +122,7 @@ public class SSTableWriter implements AutoCloseable {
     private void flushBuffer() throws IOException {
         buffer.flip();
         channel.write(buffer, currentOffset);
-        currentOffset += buffer.position();
+        currentOffset += buffer.limit();
         buffer.clear();
     }
 
