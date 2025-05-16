@@ -88,7 +88,7 @@ public class SSTableWriter implements AutoCloseable {
     }
 
     private int calculateEntrySize(int keyLength, int valueLength, boolean isDeleted) {
-        return Integer.BYTES + keyLength + Long.BYTES + Byte.BYTES + 
+        return Integer.BYTES +Integer.BYTES + Long.BYTES + keyLength +
                (isDeleted ? 0 : Integer.BYTES + valueLength);
     }
 
@@ -98,7 +98,7 @@ public class SSTableWriter implements AutoCloseable {
 
     private void writeEntryToBuffer(byte[] key, Value value) {
         buffer.putInt(key.length);
-        buffer.putInt(value.isDeleted() ? value.getValue().length : -1);
+        buffer.putInt(value.isDeleted() ? -1 : value.getValue().length);
         buffer.putLong(value.getTimestamp());
         buffer.put(key);
         if (!value.isDeleted()) {
