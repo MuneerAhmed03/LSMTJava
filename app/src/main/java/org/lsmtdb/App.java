@@ -3,12 +3,70 @@
  */
 package org.lsmtdb;
 
-public class App {
-    public String getGreeting() {
-        return "Hello World!";
-    }
+import org.lsmtdb.core.db;
+
+import java.nio.charset.StandardCharsets;
+import java.io.IOException;
+
+public class App {  
+
 
     public static void main(String[] args) {
-        System.out.println(new App().getGreeting());
+        try {
+            // create database instance
+            db database = new db("./test_db");
+            
+            // test basic put operations
+            System.out.println("testing put operations...");
+            database.put("key1", "value1");
+            database.put("key2", "value2");
+            database.put("key3", "value3");
+            
+            // test get operations
+            System.out.println("\ntesting get operations...");
+            byte[] value1 = database.get("key1".getBytes(StandardCharsets.UTF_8));
+            byte[] value2 = database.get("key2".getBytes(StandardCharsets.UTF_8));
+            byte[] value3 = database.get("key3".getBytes(StandardCharsets.UTF_8));
+            
+            // print results
+            System.out.println("key1: " + new String(value1, StandardCharsets.UTF_8));
+            System.out.println("key2: " + new String(value2, StandardCharsets.UTF_8));
+            System.out.println("key3: " + new String(value3, StandardCharsets.UTF_8));
+            
+            // test overwrite
+            System.out.println("\ntesting overwrite...");
+            database.put("key1", "new_value1");
+            value1 = database.get("key1".getBytes(StandardCharsets.UTF_8));
+            System.out.println("key1 after overwrite: " + new String(value1, StandardCharsets.UTF_8));
+            
+            // test memtable flush by adding many entries
+            System.out.println("\ntesting memtable flush...");
+            for (int i = 0; i < 500000; i++) {
+                database.put("key" + i, "value" + i);
+            }
+            
+            // test delete operations
+            System.out.println("\ntesting delete operations...");
+            // delete a key that exists
+            database.delete("key12500");
+            // try to get the deleted key
+            value1 = database.get("key12500".getBytes(StandardCharsets.UTF_8));
+            System.out.println("key12500 after delete: " + (value1 == null ? "null (deleted)" : new String(value1, StandardCharsets.UTF_8)));
+            
+            
+            // verify other keys are still accessible
+            // value2 = database.get("key25000".getBytes(StandardCharsets.UTF_8));
+            // System.out.println("key25000 after delete: " + new String(value2, StandardCharsets.UTF_8));
+            
+            // test delete and put on same key
+            database.delete("key30000");
+            database.put("key30000", "new_value_after_delete");
+            byte[] value4 = database.get("key30000".getBytes(StandardCharsets.UTF_8));
+            System.out.println("key30000 after delete and put: " + new String(value4, StandardCharsets.UTF_8));
+            
+        } catch (IOException e) {
+            System.err.println("error during test: " + e.getMessage());
+            e.printStackTrace();
+        }
     }
 }

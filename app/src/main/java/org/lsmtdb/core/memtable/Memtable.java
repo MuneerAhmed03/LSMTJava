@@ -25,21 +25,19 @@ public class Memtable {
         return instance;
     }
 
-    public void put(byte[] key, byte[] value, long timestamp) {
+    public void put(ByteArrayWrapper key, Value valueObj) {
         if (key == null) {
             throw new IllegalArgumentException("Key cant be null");
         }
 
-        ByteArrayWrapper keyWrapper = new ByteArrayWrapper(key);
-        Value valueObj = new Value(value, timestamp, false);
         lock.writeLock().lock();
         try {
-            Value oldValue = this.store.get(keyWrapper);
+            Value oldValue = this.store.get(key);
             if (oldValue != null) {
                 size.addAndGet(-oldValue.getSize());
             }
-            store.put(keyWrapper, valueObj);
-            size.addAndGet(key.length + valueObj.getSize());
+            store.put(key, valueObj);
+            size.addAndGet(key.getData().length + valueObj.getSize());
         } finally {
             lock.writeLock().unlock();
         }
