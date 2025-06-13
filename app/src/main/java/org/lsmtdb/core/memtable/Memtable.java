@@ -89,6 +89,14 @@ public class Memtable {
         return size.get() >= THRESHOLD_SIZE;
     }
 
+    public ByteArrayWrapper minKey(){
+        return store.firstKey();
+    }
+
+    public ByteArrayWrapper maxKey(){
+        return store.lastKey();
+    }
+
     public void clear() {
         lock.writeLock().lock();
         try {

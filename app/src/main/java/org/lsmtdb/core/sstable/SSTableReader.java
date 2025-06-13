@@ -27,14 +27,13 @@ public class SSTableReader implements AutoCloseable {
     private final long fileSize;
 
     public SSTableReader(String filepath) throws IOException {
-        // ensure parent directory exists
+
         Path path = Paths.get(filepath);
         Path parent = path.getParent();
         if (parent != null && !Files.exists(parent)) {
             Files.createDirectories(parent);
         }
-        
-        // create empty file if it doesn't exist
+
         File file = new File(filepath);
         if (!file.exists()) {
             file.createNewFile();
@@ -43,7 +42,6 @@ public class SSTableReader implements AutoCloseable {
         this.channel = new RandomAccessFile(file, "r").getChannel(); 
         this.fileSize = channel.size();
         
-        // if file is empty, initialize with default values
         if (this.fileSize == 0) {
             this.indexOffset = 0;
             this.dataOffset = 0;
@@ -156,7 +154,7 @@ public class SSTableReader implements AutoCloseable {
         return offset + length > this.fileSize - SSTableConstants.FOOTER_SIZE;
     }
     
-    private SSTableEntryHeader readEntryHeader(long offset) throws IOException {
+    public SSTableEntryHeader readEntryHeader(long offset) throws IOException {
         ByteBuffer headerBuffer = ByteBuffer.allocate(SSTableConstants.HEADER_SIZE);
         int bytesRead = channel.read(headerBuffer, offset);
         if (bytesRead < SSTableConstants.HEADER_SIZE) {
@@ -166,7 +164,7 @@ public class SSTableReader implements AutoCloseable {
         return SSTableEntryHeader.readFrom(headerBuffer);
     }
 
-    private byte[] readBytes(long offset, int byteLength) throws IOException {
+    public byte[] readBytes(long offset, int byteLength) throws IOException {
         if (byteLength < 0) {
             throw new IOException("invalid byte length for read: " + byteLength);
         }
@@ -186,5 +184,17 @@ public class SSTableReader implements AutoCloseable {
         if (channel != null && channel.isOpen()) {
             channel.close();
         }
+    }
+
+    public long getDataOffset() {
+        return dataOffset;
+    }
+
+    public long getIndexOffset() {
+        return indexOffset;
+    }
+
+    public FileChannel getChannel() {
+        return channel;
     }
 }

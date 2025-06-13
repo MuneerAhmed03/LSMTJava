@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
 import java.util.Iterator;
+import java.nio.charset.StandardCharsets;
 
 import org.lsmtdb.common.ByteArrayWrapper;
 import org.lsmtdb.common.Value;
@@ -25,11 +26,13 @@ public class SSTableWriter implements AutoCloseable {
     private static final int BUFFER_SIZE = 1024 * 1024;
     private static final int INDEX_ENTRY_INTERVAL = 128;
 
-    private final FileChannel channel;
+    private FileChannel channel;
     private long currentOffset;
     private final List<SSTableIndexUtils.IndexEntry> index;
     private final ByteBuffer buffer;
     private boolean isClosed;
+    private final int level;
+    private SSTableMetadata metadata;
 
     public static class IndexEntry implements SSTableIndexUtils.IndexEntry {
         private final byte[] key;
@@ -45,19 +48,8 @@ public class SSTableWriter implements AutoCloseable {
         public long getOffset() { return offset; }
     }
 
-    public SSTableWriter(String filepath) throws IOException {
-        Path path = Paths.get(filepath);
-        Path parent = path.getParent();
-        if (parent != null && !Files.exists(parent)) {
-            Files.createDirectories(parent);
-        }
-        
-        File file = new File(filepath);
-        if (!file.exists()) {
-            file.createNewFile();
-        }
-        
-        this.channel = new RandomAccessFile(file, "rw").getChannel();
+    public SSTableWriter(int level) throws IOException {
+        this.level = level;
         this.currentOffset = 0;
         this.index = new ArrayList<>();
         this.buffer = ByteBuffer.allocate(BUFFER_SIZE);
@@ -68,11 +60,37 @@ public class SSTableWriter implements AutoCloseable {
         if (isClosed) {
             throw new IllegalStateException("sstablewriter is already closed");
         }
+
+        ByteArrayWrapper minKey = memtable.minKey();
+        ByteArrayWrapper maxKey = memtable.maxKey();
+
+        TableDirectory tableDir = TableDirectory.getInstance("manifest.json");
+
+
+        String filePath = tableDir.generatePath(level);
+
+        Path path = Paths.get(filePath);
+        Path parent = path.getParent();
+        if (parent != null && !Files.exists(parent)) {
+            Files.createDirectories(parent);
+        }
+        
+        File file = new File(filePath);
+        if (!file.exists()) {
+            file.createNewFile();
+        }
+        
+        this.channel = new RandomAccessFile(file, "rw").getChannel();
+
         long dataOffset = currentOffset;
         writeData(memtable);
         long indexOffset = currentOffset;
         writeIndex();
         writeFooter(indexOffset, dataOffset);
+
+        this.metadata = tableDir.allocateNewSSTable(level, minKey, maxKey, file.length(),filePath,tableDir.getAndIncrementNextFileNumber());
+
+        tableDir.addSSTable(level, metadata);
     }
 
     private void writeData(Memtable memtable) throws IOException {
