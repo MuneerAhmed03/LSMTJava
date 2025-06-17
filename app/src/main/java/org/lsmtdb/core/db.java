@@ -38,7 +38,7 @@ public class db {
         this.memTable = new Memtable();
         String sstableFilePath = dbPath + "/sstable/" + SSTABLE_FILE;
         this.sstableReader = new SSTableReader(sstableFilePath);
-        this.sstableWriter = new SSTableWriter(sstableFilePath);
+        this.sstableWriter = new SSTableWriter(0);
     }
 
     public void put(String key, Object value) throws IOException {

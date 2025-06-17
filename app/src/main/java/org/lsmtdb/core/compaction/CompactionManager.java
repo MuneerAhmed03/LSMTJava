@@ -1,11 +1,19 @@
 package org.lsmtdb.core.compaction;
 
+import java.io.File;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
+
+import org.lsmtdb.common.ByteArrayWrapper;
 import org.lsmtdb.core.sstable.SSTableMetadata;
-import org.lsmtdb.core.sstable.merger.SSTableMerger;
+import org.lsmtdb.core.sstable.SSTableReader;
+import org.lsmtdb.core.sstable.SSTableWriter;
+import org.lsmtdb.core.sstable.TableDirectory;
+import org.lsmtdb.core.sstable.merger.*;
+
+import com.google.common.collect.Table;
 
 public class CompactionManager {
     private final List<LevelMetadata> levels;
@@ -14,26 +22,16 @@ public class CompactionManager {
     private final Map<Integer,Future<?>> activeCompaction;
     private final ReentrantLock compactionLock;
     private static final int MAX_CONCURRENT_COMPACTIONS = 1;
-    private static final int COMPACTION_CHECK_INTERVAL_MS = 1;
+    private static final int COMPACTION_CHECK_INTERVAL_MS = 60*30;
+    private final TableDirectory tableDirectory;
 
     public CompactionManager(){
-        this.levels = new ArrayList<>();
+        this.tableDirectory = TableDirectory.getInstance("manifest.json");
+        this.levels = tableDirectory.getAllLevels();
         this.compactionStrategy = new CompactionStrategy();
         this.compactionExecutor = Executors.newFixedThreadPool(MAX_CONCURRENT_COMPACTIONS);
         this.activeCompaction = new ConcurrentHashMap<>();
         this.compactionLock = new ReentrantLock();
-        initializeLevels();
-    }
-
-    private void initializeLevels(){
-        long levelSize = 8 * 4 * 1024 * 1024;
-
-        levels.add(new LevelMetadata(0, new ArrayList<>(), 0, levelSize));
-
-        for(int i = 1; i<7;i++){
-            levelSize *= 10;
-            levels.add(new LevelMetadata(i, new ArrayList<>(),0 , levelSize));
-        }
     }
 
     public void startCompactionDaemon(){
@@ -76,9 +74,10 @@ public class CompactionManager {
             return;
         }
 
-        List<SSTableMetadata> sstTablesToCompact = compactionStrategy.findOverlaps(currentLevel.sstables.get(0), currentLevel.sstables);
+        List<SSTableMetadata> sstTablesToCompact = compactionStrategy.findOverlaps(currentLevel.sstables.get(0), nextLevel.sstables);
 
         if(sstTablesToCompact.isEmpty()){
+            handleNoOverlap(currentLevel.sstables.get(0));
             return;
         }
 
@@ -88,10 +87,10 @@ public class CompactionManager {
             }catch(Exception e){
                 handleCompactionError(currentLevel.levelNumber, e);
             }finally{
-                activeCompaction.remove(currentLevel.levelNumber);
+                activeCompaction.remove(nextLevel.levelNumber);
             }
         });
-        activeCompaction.put(currentLevel.levelNumber, future);
+        activeCompaction.put(nextLevel.levelNumber, future);
     }
 
     private void performCompaction(LevelMetadata currentLevel , LevelMetadata nextLevel, List<SSTableMetadata> sstTablesToCompact) throws IOException {
@@ -115,15 +114,19 @@ public class CompactionManager {
     }
 
     private void cleanupOldSSTables(List<SSTableMetadata> oldSSTables) {
-        // delete old sstable files
-        // update manifest
-        // this is a placeholder - actual implementation needed
+        for (SSTableMetadata meta : oldSSTables) {
+            File file = new File(meta.getFilePath());
+            boolean deleted = file.delete();
+            if (!deleted) {
+                System.err.println("failed to delete sstable file: " + meta.getFilePath());
+            }
+            tableDirectory.removeSSTables(meta.getLevel(), List.of(meta));
+        }
     }
 
     private void handleCompactionError(int levelNumber, Exception e) {
-        // log error
-        // potentially retry compaction
-        // this is a placeholder - actual implementation needed
+        System.err.println("compaction error at level " + levelNumber + ": " + e.getMessage());
+        e.printStackTrace();
     }
 
     public void shutdown() {
@@ -145,4 +148,54 @@ public class CompactionManager {
             levelMetadata.totalSize += sstable.getFileSize();
         }
     }
+
+    void handleNoOverlap(SSTableMetadata sstTable){
+        SSTableIterator iterator;
+        try(SSTableReader reader = new SSTableReader(sstTable.getFilePath())){
+            iterator = new SSTableIterator(reader);
+            int level = sstTable.getLevel();
+            String newFilePath = tableDirectory.generatePath(level+1);
+            int fileNumber = tableDirectory.getAndIncrementNextFileNumber();
+
+            ByteArrayWrapper minKey = null;
+            ByteArrayWrapper maxKey = null;
+
+            try(SSTableStreamWriter writer = new SSTableStreamWriter(newFilePath)){ 
+                while (iterator.hasNext()) {
+                    iterator.next();
+
+                    ByteArrayWrapper key = iterator.getCurrentKey();
+                    byte[] value = iterator.getCurrentValue();
+                    long timestamp = iterator.getCurrentTimestamp();
+
+                    if(value == null) continue;
+
+                    writer.writeEntry(key.getData(), value, timestamp);
+
+                    if(minKey == null || key.compareTo(minKey) < 0) minKey = key;
+                    if(maxKey == null || key.compareTo(maxKey) > 0) maxKey = key;
+                }
+                writer.finish();
+            }
+
+            if(minKey == null || maxKey == null) {
+                tableDirectory.removeSSTables(level, List.of(sstTable));
+                new File(sstTable.getFilePath()).delete();
+                return;
+            }
+
+            File newFile = new File(newFilePath);
+            SSTableMetadata newMeta = tableDirectory.allocateNewSSTable(
+                level, minKey, maxKey, newFile.length(), newFilePath, fileNumber
+            );
+
+            tableDirectory.removeSSTables(level, List.of(sstTable));
+            tableDirectory.addSSTable(level +1, sstTable);
+
+            new File(sstTable.getFilePath()).delete();
+
+        }catch(IOException e){
+            throw new RuntimeException("Error creating SSTableIterator for " + sstTable.getFilePath(), e);
+        }
+    } 
 }

@@ -14,7 +14,7 @@ import org.lsmtdb.core.sstable.util.SSTableIndexUtils;
 import org.lsmtdb.core.sstable.util.SSTableFooterUtils;
 
 public class SSTableStreamWriter implements AutoCloseable {
-    private static final int BUFFER_SIZE = 1024 * 1024; // 1MB buffer
+    private static final int BUFFER_SIZE = 1024 * 1024; 
     private static final int INDEX_ENTRY_INTERVAL = 128;
 
     private final FileChannel channel;
@@ -43,8 +43,7 @@ public class SSTableStreamWriter implements AutoCloseable {
 
         long entryOffset = currentOffset + buffer.position();
         writeEntryToBuffer(key, value, timestamp, entryOffset);
-        
-        // flush buffer if full
+
         if (buffer.remaining() < SSTableConstants.HEADER_SIZE) {
             flushBuffer();
         }

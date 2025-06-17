@@ -45,7 +45,7 @@ public class SSTableIterator implements Comparable<SSTableIterator> {
         currentKey = new ByteArrayWrapper(key);
         currentTimestamp = header.timestamp;
 
-        if (header.valueLength == -1) {
+        if (header.valueLength == -1) { 
             currentValue = null;
         } else if (header.valueLength > 0) {
             currentValue = reader.readBytes(currentOffset, header.valueLength);
@@ -55,31 +55,6 @@ public class SSTableIterator implements Comparable<SSTableIterator> {
         }
         currentKey = new ByteArrayWrapper(key);
     }
-
-    // private SSTableEntryHeader readEntryHeader(long offset) throws IOException {
-    //     ByteBuffer headerBuffer = ByteBuffer.allocate(SSTableConstants.HEADER_SIZE);
-    //     int bytesRead = reader.getChannel().read(headerBuffer, currentOffset);
-    //     if (bytesRead < SSTableConstants.HEADER_SIZE) {
-    //         return null;
-    //     }
-    //     headerBuffer.flip();
-    //     return SSTableEntryHeader.readFrom(headerBuffer);
-    // }
-
-    // private byte[] readBytes(long offset, int byteLength) throws IOException {
-    //     if (byteLength < 0) {
-    //         throw new IOException("invalid byte length for read: " + byteLength);
-    //     }
-    //     if (byteLength == 0) {
-    //         return new byte[0];
-    //     }
-    //     ByteBuffer tempBuffer = ByteBuffer.allocate(byteLength);
-    //     reader.getChannel().read(tempBuffer, offset);
-    //     tempBuffer.flip();
-    //     byte[] byteArray = new byte[byteLength];
-    //     tempBuffer.get(byteArray);
-    //     return byteArray;
-    // }
 
     public ByteArrayWrapper getCurrentKey() {
         return currentKey;

@@ -97,32 +97,41 @@ public class TableDirectory {
     }
 
     private void saveManifest(){
-
         if (lastSaveOperation != null && !lastSaveOperation.isDone()) {
             lastSaveOperation.cancel(true);
         }
-
         lastSaveOperation = manifestExecutor.submit(() -> {
-            try(FileWriter writer = new FileWriter(manifestFile)){
-                Gson gson = new GsonBuilder().setPrettyPrinting().create();
+            File tempFile = new File(manifestFile.getAbsolutePath() + ".tmp");
+            try {
+                try (FileWriter writer = new FileWriter(tempFile)) {
+                    Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
-                JsonObject manifest = new JsonObject();
-                manifest.addProperty("nextFileNumber", nextFileNumber);
+                    JsonObject manifest = new JsonObject();
+                    manifest.addProperty("nextFileNumber", nextFileNumber);
 
-                JsonArray levelsJson = new JsonArray();
-                for(LevelMetadata meta : levels.values()){
-                    JsonObject levelObj = new JsonObject();
-                    levelObj.addProperty("level", meta.getLevelNumber());
-                    levelObj.addProperty("maxSize", meta.getMaxSize());
-                    levelObj.addProperty("totalSize", meta.getTotalSize());
-                    levelObj.add("sstables", gson.toJsonTree(meta.getSstables()));
-                    levelsJson.add(levelObj);
+                    JsonArray levelsJson = new JsonArray();
+                    for(LevelMetadata meta : levels.values()){
+                        JsonObject levelObj = new JsonObject();
+                        levelObj.addProperty("level", meta.getLevelNumber());
+                        levelObj.addProperty("maxSize", meta.getMaxSize());
+                        levelObj.addProperty("totalSize", meta.getTotalSize());
+                        levelObj.add("sstables", gson.toJsonTree(meta.getSstables()));
+                        levelsJson.add(levelObj);
+                    }
+
+                    manifest.add("levels",levelsJson);
+                    gson.toJson(manifest,writer);
                 }
 
-                manifest.add("levels",levelsJson);
-                gson.toJson(manifest,writer);
-            } catch (IOException e){
-                throw new RuntimeException("Failed to save manifest", e);
+                try (FileOutputStream fos = new FileOutputStream(tempFile, true)) {
+                    fos.getFD().sync();
+                }
+                if (!tempFile.renameTo(manifestFile)) {
+                    throw new IOException("failed to atomically replace manifest");
+                }
+            } catch (IOException e) {
+                System.err.println("error saving manifest: " + e.getMessage());
+                e.printStackTrace();
             }
         });
     }
@@ -132,7 +141,12 @@ public class TableDirectory {
     }
 
     private void loadManifest(){
-        if(!manifestFile.exists()) return;
+        if(!manifestFile.exists()){
+            for(int i = 0; i < 5;i++){
+                levels.put(i,new LevelMetadata(i));
+            }
+            saveManifest();
+        } 
         try(BufferedReader reader = new BufferedReader(new FileReader(manifestFile))){
             Gson gson = new Gson();
             JsonObject manifest = JsonParser.parseReader(reader).getAsJsonObject();

@@ -55,8 +55,6 @@ public class LevelMetadata {
         this.maxSize = defaultMaxSize(levelNumber); 
     }
 
-    
-
     private long defaultMaxSize(int level){
         long base = 8 * 4 * 1024 * 1024;
         for(int i =0; i< level;i++) base*=10;
