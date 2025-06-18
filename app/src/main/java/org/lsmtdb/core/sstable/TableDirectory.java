@@ -1,7 +1,10 @@
 package org.lsmtdb.core.sstable;
 
 import java.io.*;
+import java.text.CollationElementIterator;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.List;
@@ -57,6 +60,7 @@ public class TableDirectory {
 
         List<SSTableMetadata> temp = meta.getSstables();
         temp.add(sstable);
+        Collections.sort(temp,Comparator.comparing(SSTableMetadata::getMinKey));
         meta.setSstables(temp);
         meta.setTotalSize(meta.getTotalSize() + sstable.getFileSize());
         

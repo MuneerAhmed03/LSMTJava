@@ -9,11 +9,9 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.lsmtdb.common.ByteArrayWrapper;
 import org.lsmtdb.core.sstable.SSTableMetadata;
 import org.lsmtdb.core.sstable.SSTableReader;
-import org.lsmtdb.core.sstable.SSTableWriter;
 import org.lsmtdb.core.sstable.TableDirectory;
 import org.lsmtdb.core.sstable.merger.*;
 
-import com.google.common.collect.Table;
 
 public class CompactionManager {
     private final List<LevelMetadata> levels;

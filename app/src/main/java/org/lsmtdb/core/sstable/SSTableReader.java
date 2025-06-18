@@ -17,6 +17,7 @@ import org.lsmtdb.core.sstable.util.SSTableFooterUtils;
 import org.lsmtdb.core.sstable.util.SSTableFooterUtils.FooterData;
 import org.lsmtdb.core.sstable.util.SSTableIndexUtils;
 import java.nio.charset.StandardCharsets;
+import org.lsmtdb.core.sstable.NotFoundException;
 
 public class SSTableReader implements AutoCloseable {
     private final FileChannel channel;
@@ -28,16 +29,16 @@ public class SSTableReader implements AutoCloseable {
 
     public SSTableReader(String filepath) throws IOException {
 
-        Path path = Paths.get(filepath);
-        Path parent = path.getParent();
-        if (parent != null && !Files.exists(parent)) {
-            Files.createDirectories(parent);
-        }
+        // Path path = Paths.get(filepath);
+        // Path parent = path.getParent();
+        // if (parent != null && !Files.exists(parent)) {
+        //     Files.createDirectories(parent);
+        // }
 
         File file = new File(filepath);
-        if (!file.exists()) {
-            file.createNewFile();
-        }
+        // if (!file.exists()) {
+        //     file.createNewFile();
+        // }
         
         this.channel = new RandomAccessFile(file, "r").getChannel(); 
         this.fileSize = channel.size();
@@ -104,7 +105,7 @@ public class SSTableReader implements AutoCloseable {
         Map.Entry<ByteArrayWrapper,Long> entry = indexMap.floorEntry(keyWrapper);
         if (entry == null) {
             System.out.println("no floor entry found in index map");
-            return null;
+            throw new NotFoundException("key not found in sstable");
         }
         System.out.println("found floor entry at offset: " + entry.getValue());
         return scanForKey(entry.getValue(), keyWrapper);
@@ -116,38 +117,37 @@ public class SSTableReader implements AutoCloseable {
             SSTableEntryHeader header = readEntryHeader(offset);
             if (header == null) {
                 System.out.println("failed to read entry header at offset: " + offset);
-                return null;
+                throw new NotFoundException("key not found in sstable");
             }
             offset += SSTableConstants.HEADER_SIZE;
             if (isOffsetOutOfBounds(offset, header.keyLength)) {
                 System.out.println("key length out of bounds at offset: " + offset);
-                return null;
+                throw new NotFoundException("key not found in sstable");
             }
             byte[] key = readBytes(offset, header.keyLength);
             ByteArrayWrapper currentKey = new ByteArrayWrapper(key);
             offset += header.keyLength;
             int comparisonResult = currentKey.compareTo(targetKeyWrapper);
-            // System.out.println("comparing keys: " + new String(key, StandardCharsets.UTF_8) + " with target: " + new String(targetKeyWrapper.getData(), StandardCharsets.UTF_8));
             if (comparisonResult == 0) {
                 if (header.valueLength == -1) {
                     System.out.println("found tombstone marker");
-                    return null;
+                    throw new NotFoundException("key is deleted (tombstone)");
                 }
                 if (isOffsetOutOfBounds(offset, header.valueLength)) {
                     System.out.println("value length out of bounds at offset: " + offset);
-                    return null;
+                    throw new NotFoundException("key not found in sstable");
                 }
                 return readBytes(offset, header.valueLength);
             } else if (comparisonResult > 0) {
                 System.out.println("key comparison greater than target, stopping search");
-                return null;
+                throw new NotFoundException("key not found in sstable");
             }
             if (header.valueLength > 0) {
                 offset += header.valueLength;
             }
         }
         System.out.println("reached end of data section without finding key");
-        return null;
+        throw new NotFoundException("key not found in sstable");
     }
     
     private boolean isOffsetOutOfBounds(long offset, int length) {

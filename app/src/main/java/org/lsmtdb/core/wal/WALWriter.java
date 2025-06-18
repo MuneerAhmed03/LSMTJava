@@ -5,7 +5,6 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.nio.file.Files;
 import java.util.concurrent.locks.ReentrantLock;
@@ -18,13 +17,11 @@ public class WALWriter implements Closeable {
   private int currentBatchCount = 0;
 
   public WALWriter(Path walPath, int batchSize) throws IOException {
-    // ensure parent directory exists
     Path parent = walPath.getParent();
     if (parent != null && !Files.exists(parent)) {
       Files.createDirectories(parent);
     }
     
-    // create file if it doesn't exist
     if (!Files.exists(walPath)) {
       Files.createFile(walPath);
     }

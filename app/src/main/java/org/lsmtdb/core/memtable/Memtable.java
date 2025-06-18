@@ -18,7 +18,9 @@ public class Memtable {
     private final AtomicLong size = new AtomicLong(0);
     private final long THRESHOLD_SIZE = 8 * 1024 * 1024;
 
-    public Memtable getInstance() {
+    private Memtable(){}
+
+    public static Memtable getInstance() {
         if (instance == null) {
             instance = new Memtable();
         }
