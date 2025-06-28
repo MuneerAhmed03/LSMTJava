@@ -31,7 +31,7 @@ public class SSTableMerger {
 
         int nextLevel = sstablesToCompact.get(0).getLevel() + 1;
 
-        TableDirectory tableDir = TableDirectory.getInstance("manifest.json");
+        TableDirectory tableDir = TableDirectory.getInstance();
         String mergedFilePath = tableDir.generatePath(nextLevel);
         int fileNumber = tableDir.getAndIncrementNextFileNumber();
         

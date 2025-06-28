@@ -5,9 +5,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Map;
 import java.util.TreeMap;
 import org.lsmtdb.common.ByteArrayWrapper;
@@ -29,17 +26,9 @@ public class SSTableReader implements AutoCloseable {
 
     public SSTableReader(String filepath) throws IOException {
 
-        // Path path = Paths.get(filepath);
-        // Path parent = path.getParent();
-        // if (parent != null && !Files.exists(parent)) {
-        //     Files.createDirectories(parent);
-        // }
 
         File file = new File(filepath);
-        // if (!file.exists()) {
-        //     file.createNewFile();
-        // }
-        
+
         this.channel = new RandomAccessFile(file, "r").getChannel(); 
         this.fileSize = channel.size();
         

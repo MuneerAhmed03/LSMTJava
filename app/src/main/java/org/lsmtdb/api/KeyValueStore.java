@@ -19,10 +19,11 @@ import java.nio.file.Files;
 public class KeyValueStore implements IKeyValueStore {
 
     private final WALWriter walWriter;
-    private final WALReader walReader;
+    // private final WALReader walReader;
     private final Memtable memTable;
     private final SSTableWriter sstableWriter;
     private SSTableSearch ssTableSearch;
+    private static KeyValueStore keyValueStore;
 
     private KeyValueStore(String dbPath) throws IOException{
         Path path = Paths.get(dbPath);
@@ -30,20 +31,27 @@ public class KeyValueStore implements IKeyValueStore {
             Files.createDirectories(path);
         }
         
-        // create sstable directory
-        Path sstablePath = Paths.get(dbPath + "/sstable");
+        Path sstablePath = Paths.get(dbPath + "/sstables");
         if (!Files.exists(sstablePath)) {
             Files.createDirectories(sstablePath);
         }
 
         this.walWriter = new WALWriter(Paths.get(dbPath + "/wal.log"), 1000);
-        this.walReader = new WALReader(Paths.get(dbPath + "/wal.log"));
+        // this.walReader = new WALReader(Paths.get(dbPath + "/wal.log"));
         this.memTable = Memtable.getInstance();
         // String sstableFilePath = dbPath + "/sstable/" + SSTABLE_FILE;
         // this.sstableReader = new SSTableReader(sstableFilePath);
         this.sstableWriter = new SSTableWriter(0);
         this.ssTableSearch =  new SSTableSearch();
     }
+
+    public static KeyValueStore getInstance(String dbPath) throws IOException{
+        if(keyValueStore == null){
+            keyValueStore = new KeyValueStore(dbPath);
+        }
+        return keyValueStore;
+    }
+
 
     @Override
     public void put(String key, Object value) throws IOException {
@@ -61,7 +69,7 @@ public class KeyValueStore implements IKeyValueStore {
     }
 
     @Override
-    public Object get(String key) throws IOException {
+    public String get(String key) throws IOException {
         byte [] keyBytes = key.getBytes(StandardCharsets.UTF_8);
         if (memTable.get(keyBytes) != null) {    
             byte[] value =  memTable.get(keyBytes);

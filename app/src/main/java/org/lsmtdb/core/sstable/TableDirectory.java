@@ -13,7 +13,9 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 
 import org.lsmtdb.common.ByteArrayWrapper;
+import org.lsmtdb.common.AppConstants;
 import org.lsmtdb.core.compaction.LevelMetadata;
+
 
 import com.google.common.reflect.TypeToken;
 import com.google.gson.Gson;
@@ -32,13 +34,13 @@ public class TableDirectory {
     private Future<?> lastSaveOperation;
 
     private TableDirectory(String manifestFile){
-        this.manifestFile = new File(manifestFile);
+        this.manifestFile = new File(AppConstants.BASE_DB_PATH,manifestFile);
         loadManifest();
     }
 
-    public static synchronized TableDirectory getInstance(String manifestFile) {
+    public static synchronized TableDirectory getInstance() {
         if (instance == null) {
-            instance = new TableDirectory(manifestFile);
+            instance = new TableDirectory(AppConstants.MANIFEST_PATH);
         }
         return instance;
     }
@@ -88,7 +90,7 @@ public class TableDirectory {
     }
 
     public String generatePath(int level){
-        return "sstables/L" + level + "/" + nextFileNumber +".sst";
+        return AppConstants.BASE_DB_PATH + "/" + "sstables/L" + level + "/" + nextFileNumber +".sst";
     }
 
     public int getAndIncrementNextFileNumber(){
@@ -149,6 +151,7 @@ public class TableDirectory {
             for(int i = 0; i < 5;i++){
                 levels.put(i,new LevelMetadata(i));
             }
+            System.out.println("building manifest");
             saveManifest();
         } 
         try(BufferedReader reader = new BufferedReader(new FileReader(manifestFile))){

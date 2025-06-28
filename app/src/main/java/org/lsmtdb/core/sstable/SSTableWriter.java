@@ -64,7 +64,7 @@ public class SSTableWriter implements AutoCloseable {
         ByteArrayWrapper minKey = memtable.minKey();
         ByteArrayWrapper maxKey = memtable.maxKey();
 
-        TableDirectory tableDir = TableDirectory.getInstance("manifest.json");
+        TableDirectory tableDir = TableDirectory.getInstance();
 
 
         String filePath = tableDir.generatePath(level);

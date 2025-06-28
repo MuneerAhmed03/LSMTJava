@@ -12,7 +12,7 @@ public class SSTableSearch {
     private List<LevelMetadata> levels;
 
     public SSTableSearch(){
-        this.tableDirectory = TableDirectory.getInstance("manifest.json");
+        this.tableDirectory = TableDirectory.getInstance();
     }
 
     public byte[] search(ByteArrayWrapper key) throws IOException{

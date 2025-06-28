@@ -24,7 +24,7 @@ public class CompactionManager {
     private final TableDirectory tableDirectory;
 
     public CompactionManager(){
-        this.tableDirectory = TableDirectory.getInstance("manifest.json");
+        this.tableDirectory = TableDirectory.getInstance();
         this.levels = tableDirectory.getAllLevels();
         this.compactionStrategy = new CompactionStrategy();
         this.compactionExecutor = Executors.newFixedThreadPool(MAX_CONCURRENT_COMPACTIONS);
