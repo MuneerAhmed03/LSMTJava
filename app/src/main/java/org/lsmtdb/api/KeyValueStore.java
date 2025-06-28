@@ -6,7 +6,6 @@ import org.lsmtdb.core.memtable.Memtable;
 
 import org.lsmtdb.core.sstable.SSTableSearch;
 import org.lsmtdb.core.sstable.SSTableWriter;
-import org.lsmtdb.core.wal.WALReader;
 import org.lsmtdb.core.wal.WALWriter;
 import org.lsmtdb.core.wal.WalEntry;
 
@@ -15,6 +14,7 @@ import java.nio.file.Paths;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
+import org.lsmtdb.core.compaction.CompactionManager;
 
 public class KeyValueStore implements IKeyValueStore {
 
@@ -24,6 +24,8 @@ public class KeyValueStore implements IKeyValueStore {
     private final SSTableWriter sstableWriter;
     private SSTableSearch ssTableSearch;
     private static KeyValueStore keyValueStore;
+    private final CompactionManager compactionManager;
+    
 
     private KeyValueStore(String dbPath) throws IOException{
         Path path = Paths.get(dbPath);
@@ -43,6 +45,8 @@ public class KeyValueStore implements IKeyValueStore {
         // this.sstableReader = new SSTableReader(sstableFilePath);
         this.sstableWriter = new SSTableWriter(0);
         this.ssTableSearch =  new SSTableSearch();
+        this.compactionManager = new CompactionManager();
+        this.compactionManager.startCompactionDaemon();
     }
 
     public static KeyValueStore getInstance(String dbPath) throws IOException{
@@ -65,6 +69,7 @@ public class KeyValueStore implements IKeyValueStore {
             memTable.clear();
             walWriter.clear();
             System.out.println("flushed memtable to sstable");
+            compactionManager.checkAndTriggerCompaction();
         }
     }
 
@@ -93,6 +98,7 @@ public class KeyValueStore implements IKeyValueStore {
             memTable.clear();
             walWriter.clear();
             System.out.println("flushed memtable to sstable");
+            compactionManager.checkAndTriggerCompaction();
         }
     }
     

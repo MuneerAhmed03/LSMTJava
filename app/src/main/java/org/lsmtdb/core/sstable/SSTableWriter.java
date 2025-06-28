@@ -87,6 +87,9 @@ public class SSTableWriter implements AutoCloseable {
         long indexOffset = currentOffset;
         writeIndex();
         writeFooter(indexOffset, dataOffset);
+        channel.force(true);
+        long fileSize = file.length();
+        System.out.println("sstable write complete: path=" + filePath + ", level=" + level + ", fileSize=" + fileSize + ", footerOffset=" + currentOffset);
 
         this.metadata = tableDir.allocateNewSSTable(level, minKey, maxKey, file.length(),filePath,tableDir.getAndIncrementNextFileNumber());
 
@@ -144,10 +147,12 @@ public class SSTableWriter implements AutoCloseable {
     }
 
     private void writeFooter(long indexOffset, long dataOffset) throws IOException {
+        System.out.println("about to write footer at offset: " + currentOffset);
         ByteBuffer footerBuffer = ByteBuffer.allocate(SSTableConstants.FOOTER_SIZE);
         SSTableFooterUtils.writeFooter(footerBuffer, indexOffset, dataOffset);
         footerBuffer.flip();
         channel.write(footerBuffer, currentOffset);
+        System.out.println("footer written at offset: " + currentOffset);
     }
 
     private void flushBuffer() throws IOException {
@@ -162,6 +167,7 @@ public class SSTableWriter implements AutoCloseable {
         if (!isClosed) {
             channel.close();
             isClosed = true;
+            System.out.println("sstable file channel closed for level=" + level + ", path=" + (channel != null ? channel.toString() : "null"));
         }
     }
 }

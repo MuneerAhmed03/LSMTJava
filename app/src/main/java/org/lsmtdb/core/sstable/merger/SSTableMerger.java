@@ -34,8 +34,12 @@ public class SSTableMerger {
         TableDirectory tableDir = TableDirectory.getInstance();
         String mergedFilePath = tableDir.generatePath(nextLevel);
         int fileNumber = tableDir.getAndIncrementNextFileNumber();
+        String tempMergedFilePath = mergedFilePath + ".tmp";
+        System.out.println("[merger] creating temp merged file: " + tempMergedFilePath);
+        java.nio.file.Path tempPath = java.nio.file.Paths.get(tempMergedFilePath);
+        java.nio.file.Path finalPath = java.nio.file.Paths.get(mergedFilePath);
         
-        try (SSTableStreamWriter writer = new SSTableStreamWriter(mergedFilePath)) {
+        try (SSTableStreamWriter writer = new SSTableStreamWriter(tempMergedFilePath)) {
 
             while(!heap.isEmpty()){
                 SSTableIterator it = heap.poll();
@@ -78,20 +82,23 @@ public class SSTableMerger {
             }
 
             writer.finish();
-
-            File mergedFile = new File(mergedFilePath);
-            SSTableMetadata mergedMetadata = tableDir.allocateNewSSTable(
-                nextLevel,
-                minKey,
-                maxKey,
-                mergedFile.length(),
-                mergedFilePath,
-                fileNumber
-            );
-            
-            List<SSTableMetadata> result = new ArrayList<>();
-            result.add(mergedMetadata);
-            return result;
+            System.out.println("[merger] finished writing temp merged file: " + tempMergedFilePath);
         }
+        // atomic rename
+        java.nio.file.Files.move(tempPath, finalPath, java.nio.file.StandardCopyOption.REPLACE_EXISTING, java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+        System.out.println("[merger] atomically moved temp file to final merged file: " + mergedFilePath);
+        File mergedFile = new File(mergedFilePath);
+        SSTableMetadata mergedMetadata = tableDir.allocateNewSSTable(
+            nextLevel,
+            minKey,
+            maxKey,
+            mergedFile.length(),
+            mergedFilePath,
+            fileNumber
+        );
+        System.out.println("[merger] created SSTableMetadata for merged file: " + mergedFilePath + ", size=" + mergedFile.length());
+        List<SSTableMetadata> result = new ArrayList<>();
+        result.add(mergedMetadata);
+        return result;
     }
 }

@@ -35,11 +35,10 @@ public class App {
             System.out.println("key1 after overwrite: " + value1);
 
             System.out.println("\ntesting memtable flush...");
-            for (int i = 0; i < 500000; i++) {
+            for (int i = 0; i < 5000000; i++) {
                 kv.put("key" + i, "value" + i);
-                if(i%50000 == 0){
-                    System.out.println("Completed " + i + " entries");
-                }
+                // if(i%50000 == 0){
+                // }
             }
 
             System.out.println("\ntesting delete operations...");

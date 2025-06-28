@@ -1,10 +1,12 @@
 package org.lsmtdb.core.sstable.merger;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
 import org.lsmtdb.core.sstable.SSTableWriter;
@@ -14,7 +16,7 @@ import org.lsmtdb.core.sstable.util.SSTableIndexUtils;
 import org.lsmtdb.core.sstable.util.SSTableFooterUtils;
 
 public class SSTableStreamWriter implements AutoCloseable {
-    private static final int BUFFER_SIZE = 1024 * 1024; 
+    private static final int BUFFER_SIZE = 1024 * 1024;
     private static final int INDEX_ENTRY_INTERVAL = 128;
 
     private final FileChannel channel;
@@ -24,12 +26,17 @@ public class SSTableStreamWriter implements AutoCloseable {
     private boolean isClosed;
 
     public SSTableStreamWriter(String filepath) throws IOException {
-        File file = new File(filepath);
-        if (!file.exists()) {
-            file.createNewFile();
+        Path path = Paths.get(filepath);
+        Path parent = path.getParent();
+        if (parent != null && !Files.exists(parent)) {
+            Files.createDirectories(parent);
         }
-        
-        this.channel = new RandomAccessFile(file, "rw").getChannel();
+
+        this.channel = FileChannel.open(path,
+                StandardOpenOption.CREATE,
+                StandardOpenOption.WRITE,
+                StandardOpenOption.TRUNCATE_EXISTING);
+        System.out.println("[stream-writer] opened file: " + filepath);
         this.buffer = ByteBuffer.allocate(BUFFER_SIZE);
         this.currentOffset = 0;
         this.index = new ArrayList<>();
@@ -37,36 +44,31 @@ public class SSTableStreamWriter implements AutoCloseable {
     }
 
     public void writeEntry(byte[] key, byte[] value, long timestamp) throws IOException {
-        if (isClosed) {
-            throw new IllegalStateException("writer is already closed");
-        }
-
+        if (isClosed) throw new IllegalStateException("writer is already closed");
         long entryOffset = currentOffset + buffer.position();
+        // System.out.println("[stream-writer] writing entry at offset: " + entryOffset + ", key.length=" + key.length + ", value.length=" + (value == null ? -1 : value.length));
         writeEntryToBuffer(key, value, timestamp, entryOffset);
-
         if (buffer.remaining() < SSTableConstants.HEADER_SIZE) {
             flushBuffer();
         }
     }
 
-    private void writeEntryToBuffer(byte[] key, byte[] value, long timestamp, long entryOffset) {
+    private void writeEntryToBuffer(byte[] key, byte[] value, long timestamp, long entryOffset) throws IOException {
         int keyLength = key.length;
         int valueLength = value != null ? value.length : -1;
-        int entrySize = SSTableConstants.HEADER_SIZE + keyLength + valueLength;
-        
+        int entrySize = SSTableConstants.HEADER_SIZE + keyLength + (valueLength > 0 ? valueLength : 0);
+
         if (buffer.remaining() < entrySize) {
-            throw new IllegalStateException("Buffer too small for entry");
+            flushBuffer();
         }
-        
+
         if (shouldAddIndexEntry()) {
             index.add(new SSTableWriter.IndexEntry(key, entryOffset));
         }
-        
+
         SSTableEntryHeader.writeTo(buffer, keyLength, valueLength, timestamp);
         buffer.put(key);
-        if (value != null) {
-            buffer.put(value);
-        }
+        if (value != null) buffer.put(value);
     }
 
     private boolean shouldAddIndexEntry() {
@@ -74,29 +76,30 @@ public class SSTableStreamWriter implements AutoCloseable {
     }
 
     public void finish() throws IOException {
-        if (isClosed) {
-            throw new IllegalStateException("writer is already closed");
-        }
-
-        // flush any remaining data
+        if (isClosed) throw new IllegalStateException("writer is already closed");
         if (buffer.position() > 0) {
             flushBuffer();
         }
-        
-        // write index
         long indexOffset = currentOffset;
+        System.out.println("[stream-writer] writing index at offset: " + indexOffset);
         writeIndex();
-        currentOffset += calculateIndexSize();
-        
-        // write footer
+        long footerOffset = channel.position();
+        System.out.println("[stream-writer] writing footer at offset: " + footerOffset + ", indexOffset=" + indexOffset + ", dataOffset=0");
         writeFooter(indexOffset, 0);
+        long fileSize = channel.size();
+        System.out.println("[stream-writer] finish complete, file size: " + fileSize + ", footerOffset: " + footerOffset);
     }
 
     private void flushBuffer() throws IOException {
+        if (buffer.position() == 0) return;
+        System.out.println("[stream-writer] flushing buffer at file offset: " + currentOffset + ", buffer size: " + buffer.position());
         buffer.flip();
-        channel.write(buffer, currentOffset);
-        currentOffset += buffer.limit();
+        while (buffer.hasRemaining()) {
+            int written =channel.write(buffer, currentOffset);
+            currentOffset += written;
+        }
         buffer.clear();
+        System.out.println("[stream-writer] buffer flushed, new file offset: " + currentOffset);
     }
 
     private void writeIndex() throws IOException {
@@ -104,7 +107,11 @@ public class SSTableStreamWriter implements AutoCloseable {
         ByteBuffer indexBuffer = ByteBuffer.allocate(indexSize);
         SSTableIndexUtils.writeIndex(indexBuffer, index);
         indexBuffer.flip();
-        channel.write(indexBuffer, currentOffset);
+
+        while (indexBuffer.hasRemaining()) {
+            int written = channel.write(indexBuffer, currentOffset);
+            currentOffset += written;
+        }
     }
 
     private int calculateIndexSize() {
@@ -119,14 +126,26 @@ public class SSTableStreamWriter implements AutoCloseable {
         ByteBuffer footerBuffer = ByteBuffer.allocate(SSTableConstants.FOOTER_SIZE);
         SSTableFooterUtils.writeFooter(footerBuffer, indexOffset, dataOffset);
         footerBuffer.flip();
-        channel.write(footerBuffer, currentOffset);
+
+        while (footerBuffer.hasRemaining()) {
+            int written = channel.write(footerBuffer, currentOffset);
+            currentOffset += written;
+        }
     }
 
     @Override
     public void close() throws IOException {
         if (!isClosed) {
-            channel.close();
-            isClosed = true;
+            try {
+                if (channel.isOpen()) {
+                    channel.force(true);
+                    System.out.println("[stream-writer] file channel forced to disk");
+                }
+            } finally {
+                channel.close();
+                isClosed = true;
+                System.out.println("[stream-writer] file channel closed");
+            }
         }
     }
-} 
+}

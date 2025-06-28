@@ -25,12 +25,10 @@ public class SSTableReader implements AutoCloseable {
     private final long fileSize;
 
     public SSTableReader(String filepath) throws IOException {
-
-
         File file = new File(filepath);
-
         this.channel = new RandomAccessFile(file, "r").getChannel(); 
         this.fileSize = channel.size();
+        System.out.println("sstable reader open: path=" + filepath + ", fileSize=" + this.fileSize);
         
         if (this.fileSize == 0) {
             this.indexOffset = 0;
@@ -56,10 +54,28 @@ public class SSTableReader implements AutoCloseable {
     }
     
     private FooterData readFooter() throws IOException {
+        long footerOffset = this.fileSize - SSTableConstants.FOOTER_SIZE;
+        System.out.println("reading footer for file: path=" + channel.toString() + ", fileSize=" + this.fileSize + ", footerOffset=" + footerOffset);
         ByteBuffer footerBuffer = ByteBuffer.allocate(SSTableConstants.FOOTER_SIZE);
-        channel.read(footerBuffer, this.fileSize - SSTableConstants.FOOTER_SIZE);
+        channel.read(footerBuffer, footerOffset);
         footerBuffer.flip();
-        return SSTableFooterUtils.readFooter(footerBuffer);
+        try {
+            return SSTableFooterUtils.readFooter(footerBuffer);
+        } catch (IllegalArgumentException e) {
+            System.out.println("footer magic mismatch detected in file: " + channel.toString() + ", fileSize=" + this.fileSize);
+            ByteBuffer firstBytes = ByteBuffer.allocate(64);
+            channel.read(firstBytes, 0);
+            firstBytes.flip();
+            byte[] ascii = new byte[firstBytes.remaining()];
+            firstBytes.get(ascii);
+            System.out.println("first 64 bytes as ascii: " + new String(ascii));
+            System.out.print("first 64 bytes as hex: ");
+            for (byte b : ascii) {
+                System.out.printf("%02x ", b);
+            }
+            System.out.println();
+            throw e;
+        }
     }
     
     private void validateIndexOffset() throws IOException {

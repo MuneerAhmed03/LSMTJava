@@ -48,7 +48,7 @@ public class CompactionManager {
         daemon.start();
     }
 
-    private void checkAndTriggerCompaction(){
+    public void checkAndTriggerCompaction(){
         if(!compactionLock.tryLock()){
             return;
         }
@@ -57,6 +57,7 @@ public class CompactionManager {
             for(int i = 0; i< levels.size()-1 ; i++){
                 LevelMetadata currentLevel = levels.get(i);
                 if(compactionStrategy.shouldCompact(currentLevel)){
+                    
                     LevelMetadata nextLevel = i < levels.size()-1 ? levels.get(i + 1) : null;
                     triggerCompaction(currentLevel, nextLevel);
                     break;
@@ -71,16 +72,18 @@ public class CompactionManager {
         if(activeCompaction.containsKey(nextLevel.levelNumber)){
             return;
         }
-
+        ;
         List<SSTableMetadata> sstTablesToCompact = compactionStrategy.findOverlaps(currentLevel.sstables.get(0), nextLevel.sstables);
 
         if(sstTablesToCompact.isEmpty()){
+            System.out.println("compaction triggred at level " + currentLevel.levelNumber + " for sstable  " + currentLevel.sstables.get(0));
             handleNoOverlap(currentLevel.sstables.get(0));
             return;
         }
 
         Future<?> future = compactionExecutor.submit(()->{
             try{
+                System.out.println("compaction triggred at level " + currentLevel.levelNumber + " for sstable  " + sstTablesToCompact.get(0).getFileNumber());
                 performCompaction(currentLevel, nextLevel, sstTablesToCompact);
             }catch(Exception e){
                 handleCompactionError(currentLevel.levelNumber, e);
@@ -188,7 +191,7 @@ public class CompactionManager {
             );
 
             tableDirectory.removeSSTables(level, List.of(sstTable));
-            tableDirectory.addSSTable(level +1, sstTable);
+            tableDirectory.addSSTable(level +1, newMeta);
 
             new File(sstTable.getFilePath()).delete();
 

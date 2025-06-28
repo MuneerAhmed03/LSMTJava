@@ -153,6 +153,13 @@ public class TableDirectory {
             }
             System.out.println("building manifest");
             saveManifest();
+            if (lastSaveOperation != null) {
+                try {
+                    lastSaveOperation.get(); 
+                } catch (Exception e) {
+                    throw new RuntimeException("failed to save manifest", e);
+                }
+            }
         } 
         try(BufferedReader reader = new BufferedReader(new FileReader(manifestFile))){
             Gson gson = new Gson();
