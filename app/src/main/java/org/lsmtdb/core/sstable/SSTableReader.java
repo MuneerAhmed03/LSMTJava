@@ -102,6 +102,11 @@ public class SSTableReader implements AutoCloseable {
         channel.read(indexBuffer, this.indexOffset);
         indexBuffer.flip();
         indexMap.putAll(SSTableIndexUtils.readIndex(indexBuffer, indexSize));
+        // debug print for loaded index
+        System.out.println("[sstable-reader] loaded index entries:");
+        // for (Map.Entry<ByteArrayWrapper, Long> entry : indexMap.entrySet()) {
+        //     System.out.println("  key: " + new String(entry.getKey().getData(), java.nio.charset.StandardCharsets.UTF_8) + ", offset: " + entry.getValue());
+        // }
     }
 
     public byte[] get(byte[] targetKey) throws IOException { 
@@ -113,6 +118,18 @@ public class SSTableReader implements AutoCloseable {
             throw new NotFoundException("key not found in sstable");
         }
         System.out.println("found floor entry at offset: " + entry.getValue());
+        // debug: dump first 32 bytes at this offset for key398365
+        String keyStr = new String(targetKey, StandardCharsets.UTF_8);
+        if (keyStr.equals("key398365")) {
+            ByteBuffer buf = ByteBuffer.allocate(32);
+            channel.read(buf, entry.getValue());
+            buf.flip();
+            System.out.print("[sstable-reader] first 32 bytes at offset " + entry.getValue() + ": ");
+            while (buf.hasRemaining()) {
+                System.out.printf("%02x ", buf.get());
+            }
+            System.out.println();
+        }
         return scanForKey(entry.getValue(), keyWrapper);
     }
     

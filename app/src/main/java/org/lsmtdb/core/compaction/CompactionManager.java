@@ -72,7 +72,10 @@ public class CompactionManager {
         if(activeCompaction.containsKey(nextLevel.levelNumber)){
             return;
         }
-        ;
+
+        
+
+        System.out.println("compaction triggered at level " + currentLevel.levelNumber + " for sstable  " + currentLevel.sstables.get(0));
         List<SSTableMetadata> sstTablesToCompact = compactionStrategy.findOverlaps(currentLevel.sstables.get(0), nextLevel.sstables);
 
         if(sstTablesToCompact.isEmpty()){

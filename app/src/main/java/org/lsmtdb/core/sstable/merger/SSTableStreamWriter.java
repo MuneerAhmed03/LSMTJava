@@ -3,6 +3,7 @@ package org.lsmtdb.core.sstable.merger;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -24,6 +25,10 @@ public class SSTableStreamWriter implements AutoCloseable {
     private long currentOffset;
     private final List<SSTableWriter.IndexEntry> index;
     private boolean isClosed;
+    private int dataEntryCount = 0;
+    private SSTableWriter.IndexEntry floorIndexEntryForKey398365 = null;
+    private static final String TARGET_KEY = "key398365";
+
 
     public SSTableStreamWriter(String filepath) throws IOException {
         Path path = Paths.get(filepath);
@@ -48,6 +53,9 @@ public class SSTableStreamWriter implements AutoCloseable {
         long entryOffset = currentOffset + buffer.position();
         // System.out.println("[stream-writer] writing entry at offset: " + entryOffset + ", key.length=" + key.length + ", value.length=" + (value == null ? -1 : value.length));
         writeEntryToBuffer(key, value, timestamp, entryOffset);
+        if(new String(key,StandardCharsets.UTF_8).equals("key398365")){
+            System.out.println("written key398365 to sstable");
+        }
         if (buffer.remaining() < SSTableConstants.HEADER_SIZE) {
             flushBuffer();
         }
@@ -62,18 +70,31 @@ public class SSTableStreamWriter implements AutoCloseable {
             flushBuffer();
         }
 
-        if (shouldAddIndexEntry()) {
-            index.add(new SSTableWriter.IndexEntry(key, entryOffset));
+        String keyStr = new String(key, StandardCharsets.UTF_8);
+        if(keyStr.equals("key398365")){
+            System.out.println("writing header for key398365 at offset: " + entryOffset);
         }
+
+        dataEntryCount++;
+        if (dataEntryCount == 1 || dataEntryCount % INDEX_ENTRY_INTERVAL == 0) {
+            SSTableWriter.IndexEntry entry = new SSTableWriter.IndexEntry(key, entryOffset);
+            index.add(entry);
+            System.out.println("[stream-writer] added index entry: key=" + keyStr + ", offset=" + entryOffset);
+            String currentKeyStr = keyStr;
+            if (currentKeyStr.compareTo(TARGET_KEY) <= 0) {
+                floorIndexEntryForKey398365 = entry;
+            }
+            if (currentKeyStr.equals(TARGET_KEY)) {
+                System.out.println("written key398365 to sstable");
+            }
+        }
+        
 
         SSTableEntryHeader.writeTo(buffer, keyLength, valueLength, timestamp);
         buffer.put(key);
         if (value != null) buffer.put(value);
     }
 
-    private boolean shouldAddIndexEntry() {
-        return index.isEmpty() || index.size() % INDEX_ENTRY_INTERVAL == 0;
-    }
 
     public void finish() throws IOException {
         if (isClosed) throw new IllegalStateException("writer is already closed");
@@ -84,10 +105,19 @@ public class SSTableStreamWriter implements AutoCloseable {
         System.out.println("[stream-writer] writing index at offset: " + indexOffset);
         writeIndex();
         long footerOffset = channel.position();
-        System.out.println("[stream-writer] writing footer at offset: " + footerOffset + ", indexOffset=" + indexOffset + ", dataOffset=0");
+        // System.out.println("[stream-writer] writing footer at offset: " + footerOffset + ", indexOffset=" + indexOffset + ", dataOffset=0");
         writeFooter(indexOffset, 0);
         long fileSize = channel.size();
-        System.out.println("[stream-writer] finish complete, file size: " + fileSize + ", footerOffset: " + footerOffset);
+        // System.out.println("[stream-writer] finish complete, file size: " + fileSize + ", footerOffset: " + footerOffset);
+
+        if (floorIndexEntryForKey398365 != null) {
+            String floorKeyStr = new String(floorIndexEntryForKey398365.getKey(), StandardCharsets.UTF_8);
+            System.out.println("[stream-writer] floor index entry for key398365 => key: "
+                + floorKeyStr + ", offset: " + floorIndexEntryForKey398365.getOffset());
+        } else {
+            System.out.println("[stream-writer] no floor index entry found for key398365");
+        }
+        
     }
 
     private void flushBuffer() throws IOException {
@@ -105,9 +135,13 @@ public class SSTableStreamWriter implements AutoCloseable {
     private void writeIndex() throws IOException {
         int indexSize = calculateIndexSize();
         ByteBuffer indexBuffer = ByteBuffer.allocate(indexSize);
+        // debug print for index contents
+        System.out.println("[stream-writer] index entries:");
+        // for (SSTableWriter.IndexEntry idx : index) {
+        //     System.out.println("  key: " + new String(idx.getKey(), java.nio.charset.StandardCharsets.UTF_8) + ", offset: " + idx.getOffset());
+        // }
         SSTableIndexUtils.writeIndex(indexBuffer, index);
         indexBuffer.flip();
-
         while (indexBuffer.hasRemaining()) {
             int written = channel.write(indexBuffer, currentOffset);
             currentOffset += written;

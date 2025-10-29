@@ -4,7 +4,7 @@ import java.nio.ByteBuffer;
 
 public class SSTableFooterUtils {
     public static void writeFooter(ByteBuffer buffer, long indexOffset, long dataOffset) {
-        System.out.println("writing footer: indexOffset=" + indexOffset + ", dataOffset=" + dataOffset + ", magic=" + SSTableConstants.FOOTER_MAGIC);
+        // System.out.println("writing footer: indexOffset=" + indexOffset + ", dataOffset=" + dataOffset + ", magic=" + SSTableConstants.FOOTER_MAGIC);
         int posBefore = buffer.position();
         buffer.putLong(indexOffset);
         buffer.putLong(dataOffset);
@@ -15,7 +15,7 @@ public class SSTableFooterUtils {
         buffer.position(posBefore);
         buffer.get(footerBytes);
         buffer.position(oldPos);
-        System.out.println("footer bytes written: " + java.util.Arrays.toString(footerBytes));
+        // System.out.println("footer bytes written: " + java.util.Arrays.toString(footerBytes));
     }
 
     public static FooterData readFooter(ByteBuffer buffer) {
@@ -28,8 +28,8 @@ public class SSTableFooterUtils {
         buffer.position(posBefore);
         buffer.get(footerBytes);
         buffer.position(posAfter);
-        System.out.println("reading footer: indexOffset=" + indexOffset + ", dataOffset=" + dataOffset + ", magic=" + magic);
-        System.out.println("footer bytes read: " + java.util.Arrays.toString(footerBytes));
+        // System.out.println("reading footer: indexOffset=" + indexOffset + ", dataOffset=" + dataOffset + ", magic=" + magic);
+        // System.out.println("footer bytes read: " + java.util.Arrays.toString(footerBytes));
         if (magic != SSTableConstants.FOOTER_MAGIC) {
             throw new IllegalArgumentException("invalid sstable file: footer magic mismatch " + magic + " != " + SSTableConstants.FOOTER_MAGIC);
         }

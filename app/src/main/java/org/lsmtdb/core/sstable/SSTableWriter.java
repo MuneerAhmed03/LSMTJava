@@ -8,6 +8,8 @@ import java.nio.channels.FileChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.StandardOpenOption;
 import java.util.List;
 import java.util.Map;
 import java.util.ArrayList;
@@ -33,6 +35,11 @@ public class SSTableWriter implements AutoCloseable {
     private boolean isClosed;
     private final int level;
     private SSTableMetadata metadata;
+    private int dataEntryCount = 0;
+
+    private SSTableWriter.IndexEntry floorIndexEntryForKey398365 = null;
+    private static final String TARGET_KEY = "key398365";
+
 
     public static class IndexEntry implements SSTableIndexUtils.IndexEntry {
         private final byte[] key;
@@ -67,31 +74,58 @@ public class SSTableWriter implements AutoCloseable {
         TableDirectory tableDir = TableDirectory.getInstance();
 
 
-        String filePath = tableDir.generatePath(level);
+        String finalFilePath = tableDir.generatePath(level);
 
-        Path path = Paths.get(filePath);
-        Path parent = path.getParent();
+        Path finalPath = Paths.get(finalFilePath);
+        Path parent = finalPath.getParent();
         if (parent != null && !Files.exists(parent)) {
             Files.createDirectories(parent);
         }
-        
-        File file = new File(filePath);
-        if (!file.exists()) {
-            file.createNewFile();
+
+        // Write to temporary file first to avoid torn/corrupted final files on crash.
+        Path tempPath = Paths.get(finalFilePath + ".tmp");
+        File tempFile = tempPath.toFile();
+        if (!tempFile.exists()) {
+            tempFile.createNewFile();
         }
-        
-        this.channel = new RandomAccessFile(file, "rw").getChannel();
+
+        this.channel = new RandomAccessFile(tempFile, "rw").getChannel();
 
         long dataOffset = currentOffset;
         writeData(memtable);
         long indexOffset = currentOffset;
         writeIndex();
         writeFooter(indexOffset, dataOffset);
-        channel.force(true);
-        long fileSize = file.length();
-        System.out.println("sstable write complete: path=" + filePath + ", level=" + level + ", fileSize=" + fileSize + ", footerOffset=" + currentOffset);
+        channel.force(true); // ensure file contents & metadata are flushed
+        long tempFileSize = tempFile.length();
+        channel.close(); // close before atomic move (esp. important on Windows / WSL boundary)
+        isClosed = true;
 
-        this.metadata = tableDir.allocateNewSSTable(level, minKey, maxKey, file.length(),filePath,tableDir.getAndIncrementNextFileNumber());
+        // Atomic move temp -> final
+        Files.move(tempPath, finalPath, StandardCopyOption.ATOMIC_MOVE);
+
+        // fsync directory to persist the new entry in case of crash
+        if (parent != null) {
+            try (FileChannel dirChannel = FileChannel.open(parent, StandardOpenOption.READ)) {
+                dirChannel.force(true);
+            } catch (IOException e) {
+                System.err.println("[sstable-writer] directory fsync failed: " + e.getMessage());
+            }
+        }
+
+        long fileSize = Files.size(finalPath);
+        System.out.println("sstable write complete (atomic): path=" + finalFilePath + ", level=" + level + ", fileSize=" + fileSize + ", footerOffset=" + currentOffset);
+
+        if (floorIndexEntryForKey398365 != null) {
+            String floorKey = new String(floorIndexEntryForKey398365.getKey(), StandardCharsets.UTF_8);
+            System.out.println("[sstable-writer] floor index entry for key398365 => key: "
+                + floorKey + ", offset: " + floorIndexEntryForKey398365.getOffset());
+        } else {
+            System.out.println("[sstable-writer] no floor index entry found for key398365");
+        }
+        
+
+    this.metadata = tableDir.allocateNewSSTable(level, minKey, maxKey, fileSize, finalFilePath, tableDir.getAndIncrementNextFileNumber());
 
         tableDir.addSSTable(level, metadata);
     }
@@ -99,24 +133,41 @@ public class SSTableWriter implements AutoCloseable {
     private void writeData(Memtable memtable) throws IOException {
         Iterator<Map.Entry<ByteArrayWrapper, Value>> it = memtable.iterator();
         while (it.hasNext()) {
-            long entryOffset = currentOffset + buffer.position();
             Map.Entry<ByteArrayWrapper, Value> entry = it.next();
-            writeEntry(entry, entryOffset);
+            writeEntry(entry);
         }
         flushBuffer();
     }
 
-    private void writeEntry(Map.Entry<ByteArrayWrapper, Value> entry, long entryOffset) throws IOException {
-        byte[] key = entry.getKey().getData();
+    private void writeEntry(Map.Entry<ByteArrayWrapper, Value> entry) throws IOException {
+    byte[] key = entry.getKey().getData();
+    String keyStr = new String(key, StandardCharsets.UTF_8);
         Value value = entry.getValue();
         int keyLength = key.length;
         int valueLength = value.isDeleted() ? 0 : value.getValue().length;
         int entrySize = SSTableConstants.HEADER_SIZE + keyLength + (value.isDeleted() ? 0 : valueLength);
+
         if (buffer.remaining() < entrySize) {
             flushBuffer();
         }
-        if (shouldAddIndexEntry()) {
-            index.add(new IndexEntry(key, entryOffset));
+
+        long entryOffset = currentOffset + buffer.position();
+        if(keyStr.equals("key398365")){
+            System.out.println("writing header for key398365 at offset: " + entryOffset);
+        }
+
+        dataEntryCount++;
+        if (dataEntryCount == 1 || dataEntryCount % INDEX_ENTRY_INTERVAL == 0) {
+            SSTableWriter.IndexEntry entryI = new SSTableWriter.IndexEntry(key, entryOffset);
+            index.add(entryI);
+            System.out.println("[sstable-writer] added index entry: key=" + keyStr + ", offset=" + entryOffset);
+            String currentKeyStr = keyStr;
+            if (currentKeyStr.compareTo(TARGET_KEY) <= 0) {
+                floorIndexEntryForKey398365 = entryI;
+            }
+            if (currentKeyStr.equals(TARGET_KEY)) {
+                System.out.println("written key398365 to sstable");
+            }
         }
         SSTableEntryHeader.writeTo(buffer, key.length, value.isDeleted() ? -1 : value.getValue().length, value.getTimestamp());
         buffer.put(key);
@@ -125,14 +176,15 @@ public class SSTableWriter implements AutoCloseable {
         }
     }
 
-    private boolean shouldAddIndexEntry() {
-        return index.isEmpty() || index.size() % INDEX_ENTRY_INTERVAL == 0;
-    }
-
     private void writeIndex() throws IOException {
         int indexSize = calculateIndexSize();
         ByteBuffer indexBuffer = ByteBuffer.allocate(indexSize);
-        SSTableIndexUtils.writeIndex(indexBuffer, index);
+        // debug print for index contents
+        System.out.println("[sstable-writer] index entries:");
+        // for (SSTableIndexUtils.IndexEntry idx : index) {
+        //     System.out.println("  key: " + new String(idx.getKey(), java.nio.charset.StandardCharsets.UTF_8) + ", offset: " + idx.getOffset());
+        // }
+        SSTableIndexUtils.writeIndex(indexBuffer, index); 
         indexBuffer.flip();
         channel.write(indexBuffer, currentOffset);
         currentOffset += indexBuffer.limit();

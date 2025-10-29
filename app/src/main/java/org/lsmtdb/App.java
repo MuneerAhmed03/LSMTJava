@@ -45,13 +45,13 @@ public class App {
             // delete a key that exists
             kv.delete("key12500");
 
-            value1 = kv.get("key12500");
+            value1 = kv.get("key398365");
             System.out.println("key12500 after delete: " + (value1 == null ? "null (deleted)" : value1));
             
             
-            // verify other keys are still accessible
-            // value2 = kv.get("key25000");
-            // System.out.println("key25000 after delete: " + new String(value2, StandardCharsets.UTF_8));
+            //verify other keys are still accessible
+            String testValue = kv.get("key2500000");
+            System.out.println("key2500000 : " + testValue);
             
             // test delete and put on same key
             kv.delete("key30000");

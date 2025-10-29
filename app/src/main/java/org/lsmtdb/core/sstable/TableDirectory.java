@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.nio.file.StandardOpenOption;
+import java.nio.file.FileChannel; 
 
 import org.lsmtdb.common.ByteArrayWrapper;
 import org.lsmtdb.common.AppConstants;
@@ -109,6 +111,10 @@ public class TableDirectory {
         lastSaveOperation = manifestExecutor.submit(() -> {
             File tempFile = new File(manifestFile.getAbsolutePath() + ".tmp");
             try {
+                File parentDir = manifestFile.getParentFile();
+                if (parentDir != null && !parentDir.exists()) {
+                    parentDir.mkdirs();
+                }
                 try (FileWriter writer = new FileWriter(tempFile)) {
                     Gson gson = new GsonBuilder().setPrettyPrinting().create();
 
@@ -132,8 +138,17 @@ public class TableDirectory {
                 try (FileOutputStream fos = new FileOutputStream(tempFile, true)) {
                     fos.getFD().sync();
                 }
-                if (!tempFile.renameTo(manifestFile)) {
-                    throw new IOException("failed to atomically replace manifest");
+                Files.move(tempFile.toPath(), manifestFile.toPath(), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+
+                try {
+                    File parent = manifestFile.getParentFile();
+                    if (parent != null) {
+                        try (java.nio.channels.FileChannel dir = java.nio.channels.FileChannel.open(parent.toPath(), StandardOpenOption.READ)) {
+                            dir.force(true);
+                        }
+                    }
+                } catch (IOException de) {
+                    System.err.println("[manifest] directory fsync failed: " + de.getMessage());
                 }
             } catch (IOException e) {
                 System.err.println("error saving manifest: " + e.getMessage());
