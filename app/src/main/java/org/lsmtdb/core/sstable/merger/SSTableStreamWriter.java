@@ -10,6 +10,8 @@ import java.nio.file.Paths;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
 import java.util.List;
+
+import org.lsmtdb.common.ByteArrayWrapper;
 import org.lsmtdb.core.sstable.SSTableWriter;
 import org.lsmtdb.core.sstable.util.SSTableConstants;
 import org.lsmtdb.core.sstable.util.SSTableEntryHeader;
@@ -50,8 +52,14 @@ public class SSTableStreamWriter implements AutoCloseable {
 
     public void writeEntry(byte[] key, byte[] value, long timestamp) throws IOException {
         if (isClosed) throw new IllegalStateException("writer is already closed");
+
+        long entrySize = getEntrySize(new ByteArrayWrapper(key), value);
+
+        if (buffer.remaining() < entrySize) {
+            flushBuffer();
+        }
         long entryOffset = currentOffset + buffer.position();
-        // System.out.println("[stream-writer] writing entry at offset: " + entryOffset + ", key.length=" + key.length + ", value.length=" + (value == null ? -1 : value.length));
+         System.out.println("[stream-writer] writing entry at offset: " + entryOffset + ", key.length=" + key.length + ", value.length=" + (value == null ? -1 : value.length));
         writeEntryToBuffer(key, value, timestamp, entryOffset);
         if(new String(key,StandardCharsets.UTF_8).equals("key398365")){
             System.out.println("written key398365 to sstable");
@@ -62,13 +70,7 @@ public class SSTableStreamWriter implements AutoCloseable {
     }
 
     private void writeEntryToBuffer(byte[] key, byte[] value, long timestamp, long entryOffset) throws IOException {
-        int keyLength = key.length;
-        int valueLength = value != null ? value.length : -1;
-        int entrySize = SSTableConstants.HEADER_SIZE + keyLength + (valueLength > 0 ? valueLength : 0);
 
-        if (buffer.remaining() < entrySize) {
-            flushBuffer();
-        }
 
         String keyStr = new String(key, StandardCharsets.UTF_8);
         if(keyStr.equals("key398365")){
@@ -90,9 +92,9 @@ public class SSTableStreamWriter implements AutoCloseable {
         }
         
 
-        SSTableEntryHeader.writeTo(buffer, keyLength, valueLength, timestamp);
+        SSTableEntryHeader.writeTo(buffer, key.length, value.length, timestamp);
         buffer.put(key);
-        if (value != null) buffer.put(value);
+        buffer.put(value);
     }
 
 
@@ -165,6 +167,12 @@ public class SSTableStreamWriter implements AutoCloseable {
             int written = channel.write(footerBuffer, currentOffset);
             currentOffset += written;
         }
+    }
+
+    private long getEntrySize(ByteArrayWrapper key, byte[] value) {
+        int keySize = key.getData().length;
+        int valueSize = (value == null) ? 0 : value.length;
+        return SSTableConstants.HEADER_SIZE + keySize + valueSize;
     }
 
     @Override

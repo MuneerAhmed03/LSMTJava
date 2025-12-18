@@ -2,6 +2,9 @@ package org.lsmtdb.core.compaction;
 
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.locks.ReentrantLock;
@@ -68,63 +71,134 @@ public class CompactionManager {
         }
     }
 
-    private void triggerCompaction(LevelMetadata currentLevel, LevelMetadata nextLevel){
-        if(activeCompaction.containsKey(nextLevel.levelNumber)){
+    private void triggerCompaction(LevelMetadata currentLevel, LevelMetadata nextLevel) {
+
+        Future<?> placeholder = CompletableFuture.completedFuture(null);
+        Future<?> existing = activeCompaction.putIfAbsent(nextLevel.levelNumber, placeholder);
+
+        if (existing != null) {
             return;
         }
 
-        
+        try {
+            List<SSTableMetadata> inputs = pickCompactionInputs(currentLevel, nextLevel);
 
-        System.out.println("compaction triggered at level " + currentLevel.levelNumber + " for sstable  " + currentLevel.sstables.get(0));
-        List<SSTableMetadata> sstTablesToCompact = compactionStrategy.findOverlaps(currentLevel.sstables.get(0), nextLevel.sstables);
-
-        if(sstTablesToCompact.isEmpty()){
-            System.out.println("compaction triggred at level " + currentLevel.levelNumber + " for sstable  " + currentLevel.sstables.get(0));
-            handleNoOverlap(currentLevel.sstables.get(0));
-            return;
-        }
-
-        Future<?> future = compactionExecutor.submit(()->{
-            try{
-                System.out.println("compaction triggred at level " + currentLevel.levelNumber + " for sstable  " + sstTablesToCompact.get(0).getFileNumber());
-                performCompaction(currentLevel, nextLevel, sstTablesToCompact);
-            }catch(Exception e){
-                handleCompactionError(currentLevel.levelNumber, e);
-            }finally{
+            if (inputs.isEmpty()) {
+                System.out.println(
+                        "No overlapping SSTables found. Handling no-overlap case for L" +
+                                currentLevel.levelNumber + " file " + currentLevel.sstables.get(0)
+                );
+                handleNoOverlap(currentLevel.sstables.get(0));
                 activeCompaction.remove(nextLevel.levelNumber);
+                return;
             }
-        });
-        activeCompaction.put(nextLevel.levelNumber, future);
+
+            System.out.println("Compaction triggered at L" + currentLevel.levelNumber +
+                    " → L" + nextLevel.levelNumber +
+                    " for " + inputs.size() + " SSTables.");
+
+            Future<?> future = compactionExecutor.submit(() -> {
+                try {
+                    performCompaction(currentLevel, nextLevel, inputs);
+                } catch (Exception e) {
+                    handleCompactionError(currentLevel.levelNumber, e);
+                } finally {
+                    activeCompaction.remove(nextLevel.levelNumber);
+                }
+            });
+            activeCompaction.put(nextLevel.levelNumber, future);
+        } catch (Exception e) {
+            activeCompaction.remove(nextLevel.levelNumber);
+            throw e;
+        }
     }
 
-    private void performCompaction(LevelMetadata currentLevel , LevelMetadata nextLevel, List<SSTableMetadata> sstTablesToCompact) throws IOException {
-        List<SSTableMetadata> newSSTables = mergeSSTables(sstTablesToCompact);
+    private List<SSTableMetadata> pickCompactionInputs(
+            LevelMetadata currentLevel,
+            LevelMetadata nextLevel) {
 
-        currentLevel.sstables.removeAll(sstTablesToCompact);
-        currentLevel.totalSize -= sstTablesToCompact.stream().mapToLong(SSTableMetadata::getFileSize).sum();
+        SSTableMetadata first = currentLevel.sstables.get(0);
+
+        if (currentLevel.levelNumber == 0) {
+            return pickL0CompactionInputs(first, currentLevel.sstables, nextLevel.sstables);
+        } else {
+            return pickLnCompactionInputs(first, nextLevel.sstables);
+        }
+    }
+
+    private List<SSTableMetadata> pickL0CompactionInputs(
+            SSTableMetadata startingFile,
+            List<SSTableMetadata> l0files,
+            List<SSTableMetadata> nextLevelFiles) {
+
+        List<SSTableMetadata> l0Overlaps = compactionStrategy.findl0Overlaps(startingFile, l0files);
+
+        ByteArrayWrapper min = l0Overlaps.stream()
+                .map(SSTableMetadata::getMinKey)
+                .min(ByteArrayWrapper::compareTo)
+                .orElse(startingFile.getMinKey());
+
+        ByteArrayWrapper max = l0Overlaps.stream()
+                .map(SSTableMetadata::getMaxKey)
+                .max(ByteArrayWrapper::compareTo)
+                .orElse(startingFile.getMaxKey());
+
+        List<SSTableMetadata> nextLevelOverlaps =
+                compactionStrategy.findOverlapsWithinRange(min, max, nextLevelFiles);
+
+
+        List<SSTableMetadata> result = new ArrayList<>();
+        result.addAll(l0Overlaps);
+        result.addAll(nextLevelOverlaps);
+        return result;
+    }
+
+
+
+    private List<SSTableMetadata> pickLnCompactionInputs(
+            SSTableMetadata startingFile,
+            List<SSTableMetadata> nextLevelFiles) {
+
+        List<SSTableMetadata> result = compactionStrategy.findOverlaps(startingFile, nextLevelFiles);
+        result.add(startingFile);
+        return result;
+    }
+
+    private void performCompaction(LevelMetadata currentLevel , LevelMetadata nextLevel, List<SSTableMetadata> sstTablesToCompact) throws Exception {
+        List<SSTableMetadata> newSSTables = mergeSSTables(sstTablesToCompact,nextLevel.levelNumber);
+
+        tableDirectory.removeSSTables(sstTablesToCompact);
 
         if (nextLevel != null) {
-            nextLevel.sstables.addAll(newSSTables);
-            nextLevel.totalSize += newSSTables.stream()
-                .mapToLong(SSTableMetadata::getFileSize)
-                .sum();
+            tableDirectory.addSSTables(newSSTables);
         }
 
         cleanupOldSSTables(sstTablesToCompact);
     }
 
-    private List<SSTableMetadata> mergeSSTables(List<SSTableMetadata> sstablesToCompact) throws IOException {
-        return SSTableMerger.mergeSSTables(sstablesToCompact);
+    private List<SSTableMetadata> mergeSSTables(List<SSTableMetadata> sstablesToCompact,int nextLevel) throws Exception {
+        return SSTableMerger.mergeSSTables(sstablesToCompact,nextLevel);
     }
 
     private void cleanupOldSSTables(List<SSTableMetadata> oldSSTables) {
+        if (oldSSTables == null || oldSSTables.isEmpty()) {
+            return;
+        }
         for (SSTableMetadata meta : oldSSTables) {
-            File file = new File(meta.getFilePath());
-            boolean deleted = file.delete();
-            if (!deleted) {
-                System.err.println("failed to delete sstable file: " + meta.getFilePath());
+            try{
+                Path filePath = Paths.get(meta.getFilePath());
+                if (!Files.exists(filePath)) {
+                    continue;
+                }
+                File file = new File(meta.getFilePath());
+                boolean deleted = file.delete();
+                if (!deleted) {
+                    throw new IOException("Failed to delete SSTable file: " + meta.getFilePath());
+                }
+            } catch (Exception e){
+                System.err.println("error deleting sstable file: " + meta.getFilePath() + " - " + e.getMessage());
+                e.printStackTrace();
             }
-            tableDirectory.removeSSTables(meta.getLevel(), List.of(meta));
         }
     }
 
@@ -142,14 +216,6 @@ public class CompactionManager {
         } catch (InterruptedException e) {
             compactionExecutor.shutdownNow();
             Thread.currentThread().interrupt();
-        }
-    }
-
-    public void addSSTableToLevel(SSTableMetadata sstable, int level) {
-        if (level >= 0 && level < levels.size()) {
-            LevelMetadata levelMetadata = levels.get(level);
-            levelMetadata.sstables.add(sstable);
-            levelMetadata.totalSize += sstable.getFileSize();
         }
     }
 
@@ -190,7 +256,7 @@ public class CompactionManager {
 
             File newFile = new File(newFilePath);
             SSTableMetadata newMeta = tableDirectory.allocateNewSSTable(
-                level, minKey, maxKey, newFile.length(), newFilePath, fileNumber
+                level + 1, minKey, maxKey, newFile.length(), newFilePath, fileNumber
             );
 
             tableDirectory.removeSSTables(level, List.of(sstTable));

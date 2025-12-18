@@ -40,6 +40,7 @@ public class Memtable {
             }
             store.put(key, valueObj);
             size.addAndGet(key.getData().length + valueObj.getSize());
+
         } finally {
             lock.writeLock().unlock();
         }

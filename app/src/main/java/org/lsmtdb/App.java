@@ -6,62 +6,96 @@ package org.lsmtdb;
 import org.lsmtdb.api.KeyValueStore;
 
 import org.lsmtdb.common.AppConstants;
+import org.lsmtdb.common.KeyFormatter;
 import java.io.IOException;
+import java.util.Random;
+import java.util.HashSet;
 
 public class App {  
 
 
     public static void main(String[] args) throws IOException {
+
+
         try {
             KeyValueStore kv = KeyValueStore.getInstance(AppConstants.BASE_DB_PATH);
-            
+            int maxKeys = 5000000;
             System.out.println("testing put operations...");
-            kv.put("key1", "value1");
-            kv.put("key2", "value2");
-            kv.put("key3", "value3");
-
+            kv.put(KeyFormatter.formatKey("key",1,maxKeys -1), "value1");
+            kv.put(KeyFormatter.formatKey("key",2,maxKeys -1), "value2");
+            kv.put(KeyFormatter.formatKey("key",3,maxKeys -1), "value3");
             System.out.println("\ntesting get operations...");
-            String value1 = kv.get("key1");
-            String value2 = kv.get("key2");
-            String value3 = kv.get("key3");
+            String value1 = kv.get(KeyFormatter.formatKey("key",1,maxKeys -1));
+            String value2 = kv.get(KeyFormatter.formatKey("key",2,maxKeys -1));
+            String value3 = kv.get(KeyFormatter.formatKey("key",3,maxKeys -1));
 
             System.out.println("key1: " + value1);
             System.out.println("key2: " + value2);
             System.out.println("key3: " + value3);
 
             System.out.println("\ntesting overwrite...");
-            kv.put("key1", "new_value1");
-            value1 = kv.get("key1");
+            kv.put(KeyFormatter.formatKey("key",1,maxKeys -1), "new_value1");
+            value1 = kv.get(KeyFormatter.formatKey("key",1,maxKeys -1));
             System.out.println("key1 after overwrite: " + value1);
 
-            System.out.println("\ntesting memtable flush...");
-            for (int i = 0; i < 5000000; i++) {
-                kv.put("key" + i, "value" + i);
-                // if(i%50000 == 0){
-                // }
+            System.out.println("\ntesting memtable flush with random insertion...");
+
+            // Use random insertion to create overlapping key ranges in different SSTables
+            Random random = new Random(42); // Fixed seed for reproducibility
+            HashSet<Integer> insertedKeys = new HashSet<>();
+
+            int insertCount = 0;
+            while (insertCount < maxKeys) {
+                int randomKeyIndex = random.nextInt(maxKeys);
+
+                // Ensure we don't insert duplicate keys
+                if (!insertedKeys.contains(randomKeyIndex)) {
+                    String formattedKey = KeyFormatter.formatKey("key", randomKeyIndex, maxKeys - 1);
+                    kv.put(formattedKey, "value" + randomKeyIndex);
+                    insertedKeys.add(randomKeyIndex);
+                    insertCount++;
+
+                    if (insertCount % 100000 == 0) {
+                        System.out.println("Inserted " + insertCount + " keys randomly...");
+                    }
+                }
             }
+
+            System.out.println("Completed random insertion of " + maxKeys + " keys");
 
             System.out.println("\ntesting delete operations...");
             // delete a key that exists
-            kv.delete("key12500");
+            String deleteKey = KeyFormatter.formatKey("key", 12500, maxKeys - 1);
+            kv.delete(deleteKey);
 
-            value1 = kv.get("key398365");
-            System.out.println("key12500 after delete: " + (value1 == null ? "null (deleted)" : value1));
-            
+            String getKey = KeyFormatter.formatKey("key", 398365, maxKeys - 1);
+            value1 = kv.get(getKey);
+            System.out.println(deleteKey + " after delete: " + (value1 == null ? "null (deleted)" : value1));
+
             
             //verify other keys are still accessible
-            String testValue = kv.get("key2500000");
-            System.out.println("key2500000 : " + testValue);
-            
+            String testKey = KeyFormatter.formatKey("key", 2500000, maxKeys - 1);
+            String testValue = kv.get(testKey);
+            System.out.println(testKey + " : " + testValue);
+
             // test delete and put on same key
-            kv.delete("key30000");
-            kv.put("key30000", "new_value_after_delete");
-            String value4 = kv.get("key30000");
-            System.out.println("key30000 after delete and put: " + value4);
-            
+            String reusedKey = KeyFormatter.formatKey("key", 30000, maxKeys - 1);
+            kv.delete(reusedKey);
+            kv.put(reusedKey, "new_value_after_delete");
+            String value4 = kv.get(reusedKey);
+            System.out.println(reusedKey + " after delete and put: " + value4);
+
+            // Final memory report
+            System.out.println("\n=== Final Memory Report ===");
+
+        } catch (OutOfMemoryError e) {
+            System.err.println("💥 OUT OF MEMORY ERROR!");
+            throw e;
         } catch (IOException e) {
             System.err.println("error during test: " + e.getMessage());
             e.printStackTrace();
+        } finally {
+
         }
     }
 }

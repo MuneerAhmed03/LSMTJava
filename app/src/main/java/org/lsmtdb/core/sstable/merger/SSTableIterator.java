@@ -19,6 +19,7 @@ public class SSTableIterator implements Comparable<SSTableIterator> {
         this.reader = reader;
         this.currentOffset = reader.getDataOffset();
         this.hasNext = true;
+        advance();
     }
 
     public boolean hasNext() {
@@ -45,7 +46,7 @@ public class SSTableIterator implements Comparable<SSTableIterator> {
         currentKey = new ByteArrayWrapper(key);
         currentTimestamp = header.timestamp;
 
-        if (header.valueLength == -1) { 
+        if (header.valueLength == -1) {
             currentValue = null;
         } else if (header.valueLength > 0) {
             currentValue = reader.readBytes(currentOffset, header.valueLength);
@@ -53,7 +54,10 @@ public class SSTableIterator implements Comparable<SSTableIterator> {
         } else {
             currentValue = new byte[0];
         }
-        currentKey = new ByteArrayWrapper(key);
+       ;
+    }
+    public boolean isValid() {
+        return currentKey != null;
     }
 
     public ByteArrayWrapper getCurrentKey() {
@@ -71,5 +75,9 @@ public class SSTableIterator implements Comparable<SSTableIterator> {
     @Override
     public int compareTo(SSTableIterator other) {
         return currentKey.compareTo(other.getCurrentKey());
+    }
+
+    public void close() throws IOException {
+        reader.close();
     }
 }

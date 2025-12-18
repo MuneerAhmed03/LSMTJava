@@ -1,6 +1,8 @@
 package org.lsmtdb.core.sstable;
 
 import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.text.CollationElementIterator;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,7 +14,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.nio.file.StandardOpenOption;
-import java.nio.file.FileChannel; 
+import java.util.stream.Collectors;
 
 import org.lsmtdb.common.ByteArrayWrapper;
 import org.lsmtdb.common.AppConstants;
@@ -28,6 +30,8 @@ import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 
 public class TableDirectory {
+    private static final long MAX_SSTABLE_BASE_SIZE = 2 * 1024 * 1024; // 2 MB
+
     private static TableDirectory instance;
     private final File manifestFile;      
     private final Map<Integer, LevelMetadata> levels = new HashMap<>();
@@ -59,6 +63,10 @@ public class TableDirectory {
         return new ArrayList<>(levels.values());
     }
 
+    public void addSSTable(SSTableMetadata sstable){
+        addSSTable(sstable.getLevel(),sstable);
+    }
+
     public void addSSTable(int level, SSTableMetadata sstable){
         LevelMetadata meta = levels.computeIfAbsent(level, l->new LevelMetadata(level));
 
@@ -72,22 +80,49 @@ public class TableDirectory {
         saveManifest();
     }
 
+    public void addSSTables(List<SSTableMetadata> sstables){
+        sstables.stream()
+                .collect(Collectors.groupingBy(SSTableMetadata:: getLevel))
+                .forEach(this::addSSTables);
+    }
+
+    public  void addSSTables(int level, List<SSTableMetadata> sstables){
+        LevelMetadata meta = levels.computeIfAbsent(level, l->new LevelMetadata(level));
+
+        List<SSTableMetadata> temp = meta.getSstables();
+        temp.addAll(sstables);
+        Collections.sort(temp,Comparator.comparing(SSTableMetadata::getMinKey));
+        meta.setSstables(temp);
+        long sizeIncrease = sstables.stream()
+                .mapToLong(SSTableMetadata::getFileSize)
+                .sum();
+        meta.setTotalSize(meta.getTotalSize() + sizeIncrease);
+
+        levels.put(level,meta);
+        saveManifest();
+    }
+
+    public void removeSSTables(List<SSTableMetadata> toRemove) {
+        toRemove.stream()
+                .collect(Collectors.groupingBy(SSTableMetadata:: getLevel))
+                .forEach(this::removeSSTables);
+    }
+
     public void removeSSTables(int level, List<SSTableMetadata> toRemove){
         LevelMetadata meta = levels.get(level);
         if(meta == null){
             return;
         }
 
-        long metaSize = meta.getTotalSize();
-        for(SSTableMetadata s : toRemove){
-            metaSize -= s.getFileSize();
-        }
-        meta.setTotalSize(metaSize);
-        
+        long sizeReduction = toRemove.stream()
+                .mapToLong(SSTableMetadata::getFileSize)
+                .sum();
+        meta.setTotalSize(meta. getTotalSize() - sizeReduction);
+
         List<SSTableMetadata> temp = meta.getSstables();
         temp.removeIf(s -> toRemove.stream().anyMatch(r -> r.getFileNumber() == s.getFileNumber()));
         meta.setSstables(temp);
-        
+
         saveManifest();
     }
 
@@ -102,6 +137,10 @@ public class TableDirectory {
     public SSTableMetadata allocateNewSSTable(int level, ByteArrayWrapper minkey, ByteArrayWrapper maxKey, long fileSize, String path, int fileNumber){
         SSTableMetadata meta = new SSTableMetadata(fileNumber, path, minkey, maxKey, fileSize, false, level);
         return meta;
+    }
+
+    public long getMaxSSTableSizeForLevel(int level) {
+        return MAX_SSTABLE_BASE_SIZE * (long) Math.pow(10, level - 1);
     }
 
     private void saveManifest(){

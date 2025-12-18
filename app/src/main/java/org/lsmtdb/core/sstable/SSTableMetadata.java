@@ -18,6 +18,7 @@ public class SSTableMetadata {
         this.fileSize = fileSize;
         this.beingCompacted = beingCompacted;
         this.level = level;
+        this.fileNumber= fileNumber;
     }
     
     public int getFileNumber(){

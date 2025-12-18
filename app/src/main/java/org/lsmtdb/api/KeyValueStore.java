@@ -21,8 +21,7 @@ public class KeyValueStore implements IKeyValueStore {
     private final WALWriter walWriter;
     // private final WALReader walReader;
     private final Memtable memTable;
-    private final SSTableWriter sstableWriter;
-    private SSTableSearch ssTableSearch;
+    private final SSTableSearch ssTableSearch;
     private static KeyValueStore keyValueStore;
     private final CompactionManager compactionManager;
     
@@ -41,9 +40,6 @@ public class KeyValueStore implements IKeyValueStore {
         this.walWriter = new WALWriter(Paths.get(dbPath + "/wal.log"), 1000);
         // this.walReader = new WALReader(Paths.get(dbPath + "/wal.log"));
         this.memTable = Memtable.getInstance();
-        // String sstableFilePath = dbPath + "/sstable/" + SSTABLE_FILE;
-        // this.sstableReader = new SSTableReader(sstableFilePath);
-        this.sstableWriter = new SSTableWriter(0);
         this.ssTableSearch =  new SSTableSearch();
         this.compactionManager = new CompactionManager();
         this.compactionManager.startCompactionDaemon();
@@ -65,7 +61,10 @@ public class KeyValueStore implements IKeyValueStore {
         walWriter.append(new WalEntry(keyWrapper, valueObj));
         memTable.put(keyWrapper, valueObj);
         if(memTable.shouldFlush()){
-            sstableWriter.write(memTable);
+            System.out.println("sstable triggered for key: " + key);
+            try (SSTableWriter sstableWriter = new SSTableWriter(0)) {
+                sstableWriter.write(memTable);
+            }
             memTable.clear();
             walWriter.clear();
             System.out.println("flushed memtable to sstable");
@@ -94,7 +93,9 @@ public class KeyValueStore implements IKeyValueStore {
         walWriter.append(new WalEntry(keyWrapper, valueObj));
         memTable.put(keyWrapper, valueObj);
         if(memTable.shouldFlush()){
-            sstableWriter.write(memTable);
+            try (SSTableWriter sstableWriter = new SSTableWriter(0)) {
+                sstableWriter.write(memTable);
+            }
             memTable.clear();
             walWriter.clear();
             System.out.println("flushed memtable to sstable");

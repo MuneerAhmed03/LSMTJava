@@ -27,6 +27,7 @@ public class SSTableSearch {
                     SSTableMetadata l0Candidate = levelCandidates.get(i);
                     if(checkWithinRange(l0Candidate, key)){
                         try(SSTableReader ssTableReader = new SSTableReader(l0Candidate.getFilePath())){
+                            System.out.println("searching at level 0 in file: " + l0Candidate.getFilePath());
                             byte[] value = ssTableReader.get(key.getData());
                             return value;
                         } catch(NotFoundException e){
@@ -44,6 +45,7 @@ public class SSTableSearch {
                     
                     if (checkWithinRange(midSSTable, key)) {
                         try(SSTableReader ssTableReader = new SSTableReader(midSSTable.getFilePath())) {
+                            System.out.println("found candidate sstable at level " + levelNumber + " in file: " + midSSTable.getFilePath());
                             byte[] value = ssTableReader.get(key.getData());
                             return value;
                         } catch (NotFoundException e) {
