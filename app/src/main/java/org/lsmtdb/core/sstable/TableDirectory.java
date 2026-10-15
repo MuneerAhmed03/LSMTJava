@@ -51,6 +51,13 @@ public class TableDirectory {
         return instance;
     }
 
+    public static synchronized void resetForTests() {
+        if (instance != null) {
+            instance.shutdown();
+            instance = null;
+        }
+    }
+
     public List<SSTableMetadata> getSSTablesAtLevel(int level){
         return levels.getOrDefault(level, new LevelMetadata(level)).getSstables();
     }

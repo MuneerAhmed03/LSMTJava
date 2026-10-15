@@ -13,10 +13,11 @@ import org.lsmtdb.common.Value;
 public class Memtable {
 
     private static volatile Memtable instance;
+    private static final long DEFAULT_THRESHOLD_SIZE = 8 * 1024 * 1024;
+    private static volatile Long flushThresholdSizeOverrideForTests;
     private final ReadWriteLock lock = new ReentrantReadWriteLock();
     private TreeMap<ByteArrayWrapper, Value> store = new TreeMap<>();
     private final AtomicLong size = new AtomicLong(0);
-    private final long THRESHOLD_SIZE = 8 * 1024 * 1024;
 
     private Memtable(){}
 
@@ -89,7 +90,7 @@ public class Memtable {
     }
 
     public boolean shouldFlush() {
-        return size.get() >= THRESHOLD_SIZE;
+        return size.get() >= getFlushThresholdSizeBytes();
     }
 
     public ByteArrayWrapper minKey(){
@@ -118,5 +119,25 @@ public class Memtable {
         }finally{
             lock.readLock().unlock();
         }
+    }
+
+    static long getDefaultFlushThresholdSizeBytes() {
+        return DEFAULT_THRESHOLD_SIZE;
+    }
+
+    static long getFlushThresholdSizeBytes() {
+        Long override = flushThresholdSizeOverrideForTests;
+        return override != null ? override : DEFAULT_THRESHOLD_SIZE;
+    }
+
+    static void setFlushThresholdSizeForTests(long thresholdSize) {
+        if (thresholdSize <= 0) {
+            throw new IllegalArgumentException("Flush threshold must be positive");
+        }
+        flushThresholdSizeOverrideForTests = thresholdSize;
+    }
+
+    static void resetFlushThresholdSizeForTests() {
+        flushThresholdSizeOverrideForTests = null;
     }
 }

@@ -45,11 +45,23 @@ public class KeyValueStore implements IKeyValueStore {
         this.compactionManager.startCompactionDaemon();
     }
 
-    public static KeyValueStore getInstance(String dbPath) throws IOException{
+    public static synchronized KeyValueStore getInstance(String dbPath) throws IOException{
         if(keyValueStore == null){
             keyValueStore = new KeyValueStore(dbPath);
         }
         return keyValueStore;
+    }
+
+    public static synchronized void resetForTests() {
+        if (keyValueStore == null) {
+            return;
+        }
+        try {
+            keyValueStore.walWriter.close();
+        } catch (IOException ignored) {
+        }
+        keyValueStore.compactionManager.shutdown();
+        keyValueStore = null;
     }
 
 

@@ -6,6 +6,8 @@ import org.lsmtdb.core.sstable.SSTableMetadata;
 
 
 public class LevelMetadata {
+    private static final long DEFAULT_LEVEL_BASE_MAX_SIZE = 8 * 4 * 1024 * 1024;
+    private static volatile Long levelBaseMaxSizeOverrideForTests;
     int levelNumber;
     List<SSTableMetadata> sstables;
     long totalSize;
@@ -56,8 +58,28 @@ public class LevelMetadata {
     }
 
     private long defaultMaxSize(int level){
-        long base = 8 * 4 * 1024 * 1024;
+        long base = getLevelBaseMaxSizeBytes();
         for(int i =0; i< level;i++) base*=10;
         return base;
+    }
+
+    static long getDefaultLevelBaseMaxSizeBytes() {
+        return DEFAULT_LEVEL_BASE_MAX_SIZE;
+    }
+
+    static long getLevelBaseMaxSizeBytes() {
+        Long override = levelBaseMaxSizeOverrideForTests;
+        return override != null ? override : DEFAULT_LEVEL_BASE_MAX_SIZE;
+    }
+
+    static void setLevelBaseMaxSizeForTests(long baseMaxSize) {
+        if (baseMaxSize <= 0) {
+            throw new IllegalArgumentException("Level base max size must be positive");
+        }
+        levelBaseMaxSizeOverrideForTests = baseMaxSize;
+    }
+
+    static void resetLevelBaseMaxSizeForTests() {
+        levelBaseMaxSizeOverrideForTests = null;
     }
 }
